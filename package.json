@@ -8,7 +8,7 @@
   "author": "Jobh",
   "repository": {
     "type": "git",
-    "url": "https://github.com/desvendandooincrivel-ai/jobh-imoveis-manager.git"
+    "url": "https://github.com/desvendandooincrivel-ai/appimobiliario.git"
   },
   "dependencies": {
     "electron-log": "^5.4.3",
@@ -54,7 +54,7 @@
       {
         "provider": "github",
         "owner": "desvendandooincrivel-ai",
-        "repo": "jobh-imoveis-manager"
+        "repo": "appimobiliario"
       }
     ]
   }
