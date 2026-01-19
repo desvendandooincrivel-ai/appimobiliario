@@ -1,0 +1,9 @@
+
+{
+  "name": "Copy of Jobh Imóveis Manager",
+  "description": "A comprehensive property management dashboard for tracking rentals, owners, payments, and generating financial reports and PIX receipts.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
