@@ -13,6 +13,12 @@ pause
 set GH_TOKEN=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
 
 echo.
+echo Salvando codigo no GitHub (Commit & Push)...
+call git add .
+call git commit -m "Auto-update: Versao automatica via script"
+call git push origin main
+
+echo.
 echo Atualizando numero da versao...
 call npm version patch --no-git-tag-version
 
