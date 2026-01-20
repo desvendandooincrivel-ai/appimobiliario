@@ -93,13 +93,25 @@ function AppContent() {
 
         // Listen for auto-update events from Electron
         if ((window as any).ipcRenderer) {
-            (window as any).ipcRenderer.on('update_available', () => {
+            console.log('Registrando listeners de update...');
+            const ipc = (window as any).ipcRenderer;
+
+            ipc.on('update_available', () => {
+                console.log('Update available event received');
                 setUpdateStatus('available');
                 showMessageAndClear('Nova atualização disponível! Baixando...', 'info');
             });
-            (window as any).ipcRenderer.on('update_downloaded', () => {
+            ipc.on('update_downloaded', () => {
+                console.log('Update downloaded event received');
                 setUpdateStatus('downloaded');
                 showMessageAndClear('Atualização pronta! Reinicie o App para aplicar.', 'success');
+            });
+            ipc.on('update_error', (_: any, err: any) => {
+                console.error('Update error:', err);
+                // Opcional: mostrar erro para usuário ou só logar
+            });
+            ipc.on('update_status', (_: any, text: string) => {
+                console.log('Update Status:', text);
             });
         }
     }, []);
