@@ -119,6 +119,11 @@ function createWindow() {
         ipcMain.on('manual_check_update', () => {
             autoUpdater.checkForUpdates();
         });
+
+        // Handler para versão
+        ipcMain.handle('get_app_version', () => {
+            return app.getVersion();
+        });
     }
 }
 

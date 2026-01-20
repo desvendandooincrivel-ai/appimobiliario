@@ -72,6 +72,7 @@ function AppContent() {
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloaded'>('idle');
+    const [appVersion, setAppVersion] = useState('0.1.x');
 
     const monthOrder = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
@@ -113,6 +114,9 @@ function AppContent() {
             ipc.on('update_status', (_: any, text: string) => {
                 console.log('Update Status:', text);
             });
+
+            // Get App Version
+            ipc.invoke('get_app_version').then((v: string) => setAppVersion(v));
         }
     }, []);
 
@@ -601,7 +605,10 @@ function AppContent() {
                     </div>
                     <div className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl p-1.5 shadow-sm">
                         <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><ZoomOut size={16} /></button>
-                        <span className="text-xs font-black text-gray-400">{Math.round(zoomLevel * 100)}%</span>
+                        <div className="flex flex-col items-center">
+                            <span className="text-xs font-black text-gray-400">{Math.round(zoomLevel * 100)}%</span>
+                            <span className="text-[9px] font-bold text-gray-300">v{appVersion}</span>
+                        </div>
                         <button onClick={() => setZoomLevel(z => Math.min(2, z + 0.1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><ZoomIn size={16} /></button>
                     </div>
                 </div>
