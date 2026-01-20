@@ -1,17 +1,20 @@
 @echo off
 echo ========================================================
-echo   JOBH IMOVEIS MANAGER - PUBLICAR NOVA VERSAO
 echo ========================================================
+cd /d "%~dp0"
 echo.
 echo Este script vai:
-echo 1. Gerar o executavel portatil (unico arquivo)
-echo 2. Enviar automaticamente para o seu GitHub
-echo.
-echo Certifique-se de que voce atualizou a versao no package.json antes!
+echo 1. INCREMENTAR a versao automaticamente (ex: 0.1.0 -^> 0.1.1)
+echo 2. Gerar o novo instalador
+echo 3. Enviar para o GitHub
 echo.
 pause
 
 set GH_TOKEN=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
+
+echo.
+echo Atualizando numero da versao...
+call npm version patch --no-git-tag-version
 
 echo.
 echo Iniciando Build e Publicacao...

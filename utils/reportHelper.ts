@@ -47,7 +47,7 @@ export function generateRepasseListHTML(selectedRentals: Rental[], allOwners: Ow
                 return sum;
             }, 0);
 
-            const baseTxAdm = rent + itensQueCompoemBaseTxAdm;
+            const baseTxAdm = rent;
             const txAdm = baseTxAdm * (adminFeePercentage / 100);
 
             const bankFee = (rental.otherItems || []).find(item => item.description.toLowerCase().includes('tarifa'))?.amount || 0;
@@ -229,7 +229,7 @@ export function generateConsolidatedStatementHTML(groupedRentals: Record<string,
                     </div>`;
             });
 
-            const baseTxAdm = baseRent + itensQueCompoemBaseTxAdm;
+            const baseTxAdm = baseRent;
             const adminFeeTotal = baseTxAdm * (rentalAdminFeePercentage / 100);
 
             const totalInquilinoPago = baseRent + baseCharges + rentalOtherItemsTotal;

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Home, Users, User, FileText, FileDown, ZoomIn, ZoomOut, Maximize, MessageSquare, ExternalLink, Send, Sparkles, Bot, AlertTriangle, RefreshCw, Zap, ZapOff, Cloud } from 'lucide-react';
+import { Home, Users, User, FileText, FileDown, ZoomIn, ZoomOut, Maximize, MessageSquare, ExternalLink, Send, Sparkles, Bot, AlertTriangle, RefreshCw, Zap, ZapOff, Cloud, Download, Upload } from 'lucide-react';
 import { useLocalStorage } from './utils/storage';
 import { loadScript, formatBRL } from './utils/helpers';
 import { gerarDocumentoPDF } from './utils/pdfHelper';
@@ -71,6 +71,7 @@ function AppContent() {
     const [waLog, setWaLog] = useState<{ contact: string, text: string, time: string }[]>([]);
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
+    const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloaded'>('idle');
 
     const monthOrder = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
@@ -88,6 +89,18 @@ function AppContent() {
             console.log('Injecting missing sample data:', missingSamples.length);
             setRentals(prev => [...prev, ...missingSamples]);
             showMessageAndClear(`${missingSamples.length} novos inquilinos de teste adicionados!`, 'success');
+        }
+
+        // Listen for auto-update events from Electron
+        if ((window as any).ipcRenderer) {
+            (window as any).ipcRenderer.on('update_available', () => {
+                setUpdateStatus('available');
+                showMessageAndClear('Nova atualização disponível! Baixando...', 'info');
+            });
+            (window as any).ipcRenderer.on('update_downloaded', () => {
+                setUpdateStatus('downloaded');
+                showMessageAndClear('Atualização pronta! Reinicie o App para aplicar.', 'success');
+            });
         }
     }, []);
 
@@ -507,6 +520,46 @@ function AppContent() {
         showMessageAndClear('Desconectado do Google Drive.', 'info');
     };
 
+    const handleExportData = () => {
+        const data = {
+            owners, rentals, occurrences, pixConfig,
+            version: '1.0',
+            userInfo: { exportDate: new Date().toISOString() }
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        if ((window as any).saveAs) {
+            (window as any).saveAs(blob, `backup_jobh_${new Date().toLocaleDateString().replace(/\//g, '-')}.json`);
+            showMessageAndClear('Backup local exportado com sucesso!', 'success');
+        } else {
+            showMessageAndClear('Biblioteca de download ainda carregando...', 'error');
+        }
+    };
+
+    const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const json = JSON.parse(ev.target?.result as string);
+                if (window.confirm(`Importar backup de ${json.userInfo?.exportDate || 'Data desconhecida'}? Isso substituirá os dados atuais.`)) {
+                    if (json.owners) setOwners(json.owners);
+                    if (json.rentals) setRentals(json.rentals);
+                    if (json.occurrences) setOccurrences(json.occurrences);
+                    if (json.pixConfig) setPixConfig(json.pixConfig);
+                    showMessageAndClear('Dados importados com sucesso!', 'success');
+                    setTimeout(() => window.location.reload(), 1500);
+                }
+            } catch (err) {
+                console.error(err);
+                showMessageAndClear('Arquivo de backup inválido.', 'error');
+            }
+        };
+        reader.readAsText(file);
+        // Reset input
+        e.target.value = '';
+    };
+
     return (
         <div className="flex bg-gray-100 font-sans min-h-screen text-gray-900" style={{ zoom: zoomLevel }}>
             <nav className="w-64 bg-white border-r flex flex-col no-print shadow-xl z-30">
@@ -524,7 +577,16 @@ function AppContent() {
                     <NavItem icon={<AlertTriangle size={18} />} label="Chamados" active={currentView === 'occurrences'} onClick={() => setCurrentView('occurrences')} />
                     <NavItem icon={<FileDown size={18} />} label="Documentos" active={currentView === 'documents'} onClick={() => setCurrentView('documents')} />
                 </ul>
-                <div className="p-6 border-t bg-gray-50/50">
+                <div className="p-6 border-t bg-gray-50/50 space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <button onClick={handleExportData} className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-xl shadow-sm text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-indigo-600 transition-all group">
+                            <Download size={14} className="group-hover:scale-110 transition-transform" /> Exportar
+                        </button>
+                        <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-xl shadow-sm text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-indigo-600 transition-all cursor-pointer group">
+                            <Upload size={14} className="group-hover:scale-110 transition-transform" /> Importar
+                            <input type="file" accept=".json" hidden onChange={handleImportData} />
+                        </label>
+                    </div>
                     <div className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl p-1.5 shadow-sm">
                         <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><ZoomOut size={16} /></button>
                         <span className="text-xs font-black text-gray-400">{Math.round(zoomLevel * 100)}%</span>

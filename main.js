@@ -70,21 +70,46 @@ function createWindow() {
     // AUTO UPDATER
     const { autoUpdater } = require('electron-updater');
 
-    // Configura logs para debug se necessário
+    // Configura logs
     autoUpdater.logger = require("electron-log");
     autoUpdater.logger.transports.file.level = "info";
 
-    // Verifica atualizações silenciosamente e notifica se houver
-    if (app.isPackaged) {
-        autoUpdater.checkForUpdatesAndNotify();
+    // DESABILITA o download automático para podermos controlar a UX (opcional, mas aqui vamos deixar auto)
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
 
-        // Eventos opcionais para notificar a render process (UI) se você quiser mostrar barra de progresso no futuro
-        autoUpdater.on('update-available', () => {
+    if (app.isPackaged) {
+        // Enviar eventos para a UI
+        autoUpdater.on('checking-for-update', () => {
+            win.webContents.send('update_status', 'Verificando atualizações...');
+        });
+
+        autoUpdater.on('update-available', (info) => {
             win.webContents.send('update_available');
+            win.webContents.send('update_status', 'Atualização disponível. Baixando...');
         });
-        autoUpdater.on('update-downloaded', () => {
+
+        autoUpdater.on('update-not-available', (info) => {
+            win.webContents.send('update_status', 'Sistema atualizado.');
+        });
+
+        autoUpdater.on('error', (err) => {
+            win.webContents.send('update_error', err.toString());
+        });
+
+        autoUpdater.on('download-progress', (progressObj) => {
+            // Se quiser barra de progresso no futuro: progressObj.percent
+        });
+
+        autoUpdater.on('update-downloaded', (info) => {
             win.webContents.send('update_downloaded');
+            win.webContents.send('update_status', 'Pronto para instalar.');
         });
+
+        // Checar após 3 segundos para garantir que o React carregou
+        setTimeout(() => {
+            autoUpdater.checkForUpdates();
+        }, 3000);
     }
 }
 
