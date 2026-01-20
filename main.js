@@ -106,10 +106,19 @@ function createWindow() {
             win.webContents.send('update_status', 'Pronto para instalar.');
         });
 
-        // Checar após 3 segundos para garantir que o React carregou
-        setTimeout(() => {
+        // Tenta checar imediatamente após carregar a página
+        win.webContents.on('did-finish-load', () => {
+            win.webContents.send('update_status', 'Iniciando verificação...');
+            autoUpdater.checkForUpdatesAndNotify().catch(err => {
+                console.log('Erro ao checkar updates:', err);
+                win.webContents.send('update_error', err.toString());
+            });
+        });
+
+        // Listener para verificação manual vinda do Front (se quisermos um botão "Verificar Agora")
+        ipcMain.on('manual_check_update', () => {
             autoUpdater.checkForUpdates();
-        }, 3000);
+        });
     }
 }
 
