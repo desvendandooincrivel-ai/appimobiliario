@@ -72,6 +72,7 @@ function AppContent() {
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloaded'>('idle');
+    const [downloadProgress, setDownloadProgress] = useState(0);
     const [appVersion, setAppVersion] = useState('0.1.x');
 
     const monthOrder = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -113,6 +114,10 @@ function AppContent() {
             });
             ipc.on('update_status', (_: any, text: string) => {
                 console.log('Update Status:', text);
+            });
+
+            ipc.on('download_progress', (_: any, progressObj: any) => {
+                setDownloadProgress(Math.round(progressObj.percent));
             });
 
             // Get App Version
@@ -854,6 +859,38 @@ function AppContent() {
             {isPixConfigModalOpen && <ModalConfiguracaoPix isOpen={isPixConfigModalOpen} onClose={() => setIsPixConfigModalOpen(false)} pixConfig={pixConfig} setPixConfig={setPixConfig} showMessage={showMessageAndClear} />}
 
             {itemsConfig && <ModalOtherItems config={itemsConfig} onClose={() => setItemsConfig(null)} onSave={handleSaveItems} />}
+
+            {/* COMPONENTE DE NOTIFICAÇÃO DE UPDATE */}
+            {updateStatus !== 'idle' && (
+                <div className={`fixed bottom-16 right-4 z-[9999] p-4 rounded-xl shadow-2xl border flex flex-col gap-2 animate-slide-in min-w-[300px] ${updateStatus === 'downloaded' ? 'bg-green-600 text-white border-green-700' : 'bg-blue-600 text-white border-blue-700'}`}>
+                    <div className="flex items-center gap-3">
+                        {updateStatus === 'downloaded' ? <Sparkles size={24} className="animate-pulse" /> : <RefreshCw size={24} className="animate-spin" />}
+                        <div className="flex-1">
+                            <h4 className="font-black uppercase text-sm">{updateStatus === 'downloaded' ? 'ATUALIZAÇÃO PRONTA!' : 'BAIXANDO NOVIDADES...'}</h4>
+                            <p className="text-xs opacity-90">{updateStatus === 'downloaded' ? 'Nova versão baixada e pronta.' : 'Instalando melhorias no sistema.'}</p>
+                        </div>
+                    </div>
+
+                    {updateStatus === 'available' && (
+                        <div className="w-full bg-black/20 rounded-full h-2 mt-1 overflow-hidden">
+                            <div className="bg-white h-full transition-all duration-300" style={{ width: `${downloadProgress}%` }}></div>
+                        </div>
+                    )}
+
+                    {updateStatus === 'downloaded' && (
+                        <div className="flex gap-2 mt-2">
+                            <button onClick={() => {
+                                (window as any).ipcRenderer.send('manual_install_update');
+                            }} className="flex-1 bg-white text-green-700 hover:bg-green-50 p-2 rounded-lg text-xs font-black uppercase transition-colors shadow-sm">
+                                ATUALIZAR AGORA
+                            </button>
+                            <button onClick={() => setUpdateStatus('idle')} className="flex-1 bg-green-700 hover:bg-green-800 text-white p-2 rounded-lg text-xs font-black uppercase transition-colors">
+                                DEPOIS
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {isStatementModalOpen && <StatementSelectionModal isOpen={isStatementModalOpen} data={currentStatementData} owners={owners} selectedMonth={selectedMonth} selectedYear={selectedYear} onClose={() => setIsStatementModalOpen(false)} showMessage={showMessageAndClear} onGenerateStatementWithNotes={handleGenerateStatementWithNotes} pixConfig={pixConfig} />}
         </div>

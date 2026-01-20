@@ -98,13 +98,16 @@ function createWindow() {
         });
 
         autoUpdater.on('download-progress', (progressObj) => {
-            // Se quiser barra de progresso no futuro: progressObj.percent
+            win.webContents.send('download_progress', progressObj);
         });
 
         autoUpdater.on('update-downloaded', (info) => {
             win.webContents.send('update_downloaded');
             win.webContents.send('update_status', 'Pronto para instalar.');
         });
+
+        // Não instalar sozinho ao fechar, esperar o usuário mandar
+        autoUpdater.autoInstallOnAppQuit = false;
 
         // Tenta checar imediatamente após carregar a página
         win.webContents.on('did-finish-load', () => {
@@ -113,6 +116,11 @@ function createWindow() {
                 console.log('Erro ao checkar updates:', err);
                 win.webContents.send('update_error', err.toString());
             });
+        });
+
+        // Handler para instalar agora
+        ipcMain.on('manual_install_update', () => {
+            autoUpdater.quitAndInstall();
         });
 
         // Listener para verificação manual vinda do Front (se quisermos um botão "Verificar Agora")

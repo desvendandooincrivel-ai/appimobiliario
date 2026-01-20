@@ -1,6 +1,6 @@
 {
   "name": "jobh-imoveis-manager",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "main": "main.js",
   "homepage": "./",
@@ -53,7 +53,8 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false
+      "allowToChangeInstallationDirectory": false,
+      "artifactName": "jobh-imoveis-manager-setup-${version}.${ext}"
     },
     "publish": [
       {
