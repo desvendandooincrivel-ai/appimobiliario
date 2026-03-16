@@ -130,41 +130,106 @@ export const ModalAplicarReajuste: React.FC<{ rental: Rental; onClose: () => voi
 };
 
 export const ModalOtherItems: React.FC<{ config: { rental: Rental; itemType: 'owner' | 'tenant' }; onClose: () => void; onSave: (id: string, items: Item[], type: 'owner' | 'tenant') => void }> = ({ config, onClose, onSave }) => {
-    const [items, setItems] = useState(config.itemType === 'owner' ? config.rental.ownerItems : config.rental.otherItems);
+    const [items, setItems] = useState<Item[]>(config.itemType === 'owner' ? (config.rental.ownerItems || []) : (config.rental.otherItems || []));
     const [description, setDescription] = useState('');
     const [amountText, setAmountText] = useState('');
+    const [type, setType] = useState<'unique' | 'permanent' | 'installment'>('unique');
+    const [totalInstallments, setTotalInstallments] = useState('2');
 
     const handleAdd = () => {
         const amount = parseFloat(amountText.replace(',', '.'));
         if (description && !isNaN(amount)) {
-            setItems([...items, { id: Date.now().toString(), description, amount }]);
-            setDescription(''); setAmountText('');
+            let finalDescription = description;
+            if (type === 'installment') {
+                finalDescription = `${description} (1 de ${totalInstallments})`;
+            }
+            const newItem: Item = {
+                id: Date.now().toString(),
+                description: finalDescription,
+                amount,
+                type,
+                totalInstallments: type === 'installment' ? parseInt(totalInstallments) : undefined,
+                currentInstallment: type === 'installment' ? 1 : undefined
+            };
+            setItems([...items, newItem]);
+            setDescription(''); setAmountText(''); setType('unique');
         }
     };
 
     return (
         <Modal isOpen={true} onClose={onClose} title={config.itemType === 'owner' ? 'Ajustes de Repasse' : 'Itens Adicionais'}>
             <div className="space-y-4">
-                <div className="flex gap-2 items-end">
-                    <div className="flex-1"><label className="text-xs">Descrição</label><input value={description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.currentTarget.value)} className="w-full p-2 border rounded" /></div>
-                    <div className="w-32"><label className="text-xs">Valor (R$)</label><input value={amountText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmountText(e.currentTarget.value)} className="w-full p-2 border rounded" placeholder="-50,00" /></div>
-                    <button onClick={handleAdd} className="bg-blue-600 text-white p-2 rounded"><IconeMais /></button>
-                </div>
-                <ul className="divide-y border rounded">
-                    {items.map(item => (
-                        <li key={item.id} className="flex justify-between p-3">
-                            <span>{item.description}</span>
-                            <div className="flex items-center space-x-3">
-                                <span className={item.amount < 0 ? 'text-red-600' : 'text-green-600'}>{formatBRL(item.amount)}</span>
-                                <button onClick={() => setItems(items.filter(i => i.id !== item.id))} className="text-red-500"><IconeLixeira /></button>
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3">
+                    <div className="flex gap-2">
+                        <div className="flex-1">
+                            <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Descrição</label>
+                            <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="Ex: Pintura, Conserto..." />
+                        </div>
+                        <div className="w-32">
+                            <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Valor (R$)</label>
+                            <input value={amountText} onChange={(e) => setAmountText(e.target.value)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="-50,00" />
+                        </div>
+                    </div>
+
+                    <div className="flex gap-2 items-end">
+                        <div className="flex-1">
+                            <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Tipo de Cobrança</label>
+                            <select value={type} onChange={(e) => setType(e.target.value as any)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                                <option value="unique">Único (Só este mês)</option>
+                                <option value="permanent">Permanente (Todo mês)</option>
+                                <option value="installment">Parcelado (Dividido)</option>
+                            </select>
+                        </div>
+                        {type === 'installment' && (
+                            <div className="w-24">
+                                <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Parcelas</label>
+                                <input type="number" min="2" value={totalInstallments} onChange={(e) => setTotalInstallments(e.target.value)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
                             </div>
-                        </li>
-                    ))}
-                    {items.length === 0 && <li className="p-3 text-center text-gray-500">Nenhum item.</li>}
-                </ul>
-                <div className="flex justify-between pt-4 border-t items-center">
-                    <span className="font-bold">Total: {formatBRL(items.reduce((acc, i) => acc + i.amount, 0))}</span>
-                    <button onClick={() => { onSave(config.rental.id, items, config.itemType); onClose(); }} className="px-4 py-2 bg-green-600 text-white rounded">Salvar</button>
+                        )}
+                        <button onClick={handleAdd} className="bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-xl shadow-lg shadow-indigo-100 transition-all transform active:scale-95">
+                            <IconeMais />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto border border-gray-100 rounded-2xl overflow-hidden shadow-inner bg-white">
+                    <ul className="divide-y divide-gray-50">
+                        {items.map(item => (
+                            <li key={item.id} className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
+                                <div className="flex flex-col">
+                                    <span className="font-bold text-gray-700">{item.description}</span>
+                                    <span className="text-[9px] font-black uppercase tracking-wider text-indigo-400">
+                                        {item.type === 'permanent' ? '• Permanente' : 
+                                         item.type === 'installment' ? `• Parcela ${item.currentInstallment} de ${item.totalInstallments}` : 
+                                         '• Único'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center space-x-4">
+                                    <span className={`font-black ${item.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                        {formatBRL(item.amount)}
+                                    </span>
+                                    <button onClick={() => setItems(items.filter(i => i.id !== item.id))} className="text-gray-300 hover:text-red-500 transition-colors p-1">
+                                        <IconeLixeira />
+                                    </button>
+                                </div>
+                            </li>
+                        ))}
+                        {items.length === 0 && (
+                            <li className="p-10 text-center flex flex-col items-center gap-2">
+                                <span className="text-gray-300 font-bold uppercase text-xs">Nenhum item adicionado</span>
+                            </li>
+                        )}
+                    </ul>
+                </div>
+
+                <div className="flex justify-between items-center pt-6 border-t border-gray-100">
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase text-gray-400">Total Ajustes</span>
+                        <span className="text-2xl font-black text-gray-800">{formatBRL(items.reduce((acc, i) => acc + i.amount, 0))}</span>
+                    </div>
+                    <button onClick={() => { onSave(config.rental.id, items, config.itemType); onClose(); }} className="px-10 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl shadow-indigo-100 transition-all transform hover:scale-105 active:scale-95">
+                        SALVAR
+                    </button>
                 </div>
             </div>
         </Modal>
@@ -245,11 +310,12 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
     const [qrCodeBase64, setQrCodeBase64] = useState(pixConfig?.qrCodeBase64 || '');
     const [pixPayload, setPixPayload] = useState(pixConfig?.pixPayload || '');
     const [statementNotes, setStatementNotes] = useState(pixConfig?.statementNotes || '');
+    const [occurrenceContact, setOccurrenceContact] = useState(pixConfig?.occurrenceContact || '');
     const fileRef = useRef<HTMLInputElement>(null);
 
     const handleSave = () => {
         if (!name || !doc) { showMessage('Nome e Documento obrigatórios.', 'error'); return; }
-        setPixConfig({ name, doc, pixKey, qrCodeBase64, pixPayload, statementNotes });
+        setPixConfig({ name, doc, pixKey, qrCodeBase64, pixPayload, statementNotes, occurrenceContact });
         showMessage('Configuração salva!', 'success'); onClose();
     };
 
@@ -282,6 +348,7 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
                     </div>
                 </div>
                 <div><label>Notas Padrão (Demonstrativo)</label><textarea value={statementNotes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setStatementNotes(e.currentTarget.value)} rows={3} className="w-full p-2 border rounded" /></div>
+                <div><label>Contato para Chamados (ex: 552299999999)</label><input value={occurrenceContact} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOccurrenceContact(e.currentTarget.value)} className="w-full p-2 border rounded" placeholder="Apenas números, com DDI e DDD" /></div>
                 <div className="flex justify-end pt-2"><button onClick={handleSave} className="bg-green-600 text-white px-4 py-2 rounded">Salvar</button></div>
             </div>
         </Modal>

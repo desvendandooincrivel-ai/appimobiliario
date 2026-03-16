@@ -1,6 +1,6 @@
 {
   "name": "jobh-imoveis-manager",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "main": "main.js",
   "homepage": "./",
@@ -14,8 +14,12 @@
     "electron-log": "^5.4.3",
     "electron-updater": "^6.7.3",
     "lucide-react": "latest",
+    "node-fetch": "^3.3.2",
+    "p-queue": "^6.6.2",
+    "qrcode": "^1.5.4",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "whatsapp-web.js": "^1.34.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

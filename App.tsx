@@ -68,7 +68,7 @@ function AppContent() {
     const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
     const [confirmAction, setConfirmAction] = useState<ConfirmAction>({ type: null, id: null, data: null });
     const [libsLoaded, setLibsLoaded] = useState(false);
-    const [waLog, setWaLog] = useState<{ contact: string, text: string, time: string }[]>([]);
+    const [waLog, setWaLog] = useState<{ role: 'user' | 'assistant', contact?: string, content: string, time: string }[]>([]);
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloaded'>('idle');
@@ -125,75 +125,71 @@ function AppContent() {
         }
     }, []);
 
-    // MONITOR INTEGRADO WHATSAPP (MODO FANTASMA - TOTALMENTE ATIVO)
+    // --- BOT HEADLESS INTEGRATION ---
+    const [botStatus, setBotStatus] = useState<'disconnected' | 'starting' | 'connected'>('disconnected');
+    const [botQrCode, setBotQrCode] = useState<string>('');
+    const [botLogs, setBotLogs] = useState<{ time: string, role: string, content: string, contact: string }[]>([]);
+
     useEffect(() => {
-        const interval = setInterval(async () => {
-            const view = document.getElementById('wa-view') as any;
-            if (view?.tagName === 'WEBVIEW') {
-                try {
-                    const res = await view.executeJavaScript(`(function(){ 
-                        // 1. BUSCA ATIVA: Procura por bolinhas de mensagens não lidas (números ou pontos verdes)
-                        const unreadBadge = document.querySelector('span[aria-label*="lida"], span[aria-label*="unread"], ._am_9 ._am_b'); 
-                        
-                        // Se encontrar uma mensagem não lida de outro contato, clica nela para abrir o chat
-                        if (unreadBadge) {
-                            const chatRow = unreadBadge.closest('div[role="row"]');
-                            if (chatRow) {
-                                chatRow.click();
-                                return { status: 'switching' }; // Avisa que está trocando de chat
-                            }
-                        }
-
-                        // 2. LEITURA: Se o chat estiver aberto, lê a última do cliente (inbound)
-                        const messages = Array.from(document.querySelectorAll('div.message-in'));
-                        if (messages.length === 0) return null;
-                        
-                        const last = messages[messages.length - 1];
-                        const text = last.innerText.replace(/\\n/g,' ').trim();
-                        const contact = document.querySelector('header span[title]')?.innerText;
-                        
-                        if (!text || text.length < 1) return null;
-                        
-                        return { contact, lastMessage: text };
-                    })()`);
-
-                    if (res && res.status === 'switching') {
-                        return; // Espera o próximo ciclo com o chat novo aberto
+        if ((window as any).ipcRenderer) {
+            const ipc = (window as any).ipcRenderer;
+            ipc.on('bot_event', (_: any, msg: any) => {
+                if (msg.type === 'STATUS') {
+                    setBotStatus(msg.data === 'CONNECTED' ? 'connected' : 'disconnected');
+                    if (msg.data === 'CONNECTED') setBotQrCode('');
+                }
+                if (msg.type === 'QR_CODE') {
+                    setBotStatus('starting');
+                    // Converter texto do QR para Imagem usando qrcode-generator (já carregado no window)
+                    try {
+                        const typeNumber = 0;
+                        const errorCorrectionLevel = 'L';
+                        const qr = (window as any).qrcode(typeNumber, errorCorrectionLevel);
+                        qr.addData(msg.data);
+                        qr.make();
+                        setBotQrCode(qr.createDataURL(4)); // cell size 4
+                    } catch (e) {
+                        console.error('Erro ao gerar QR', e);
                     }
+                }
+                if (msg.type === 'LOG') {
+                    setBotLogs(prev => [{ ...msg.data, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
+                }
+                if (msg.type === 'ACTION') {
+                    // Executar ação solicitada pelo Bot (ex: Criar ocorrencia)
+                    handleAIAction(msg.action.name, msg.action.params);
+                }
+            });
+        }
+    }, []);
 
-                    if (res && res.lastMessage && res.lastMessage !== lastMsgRef.current) {
-                        lastMsgRef.current = res.lastMessage;
-                        const ctx = { contact: res.contact, lastMessages: [res.lastMessage] };
-                        setWaContext(ctx);
+    // Sync Data to Bot Process
+    useEffect(() => {
+        if ((window as any).ipcRenderer) {
+            const ipc = (window as any).ipcRenderer;
+            const contextData = { owners, rentals, occurrences };
+            ipc.send('bot_update_data', contextData);
 
-                        // Atualiza o log de mensagens (mantém as últimas 20)
-                        setWaLog(prev => {
-                            const newEntry = { contact: res.contact, text: res.lastMessage, time: new Date().toLocaleTimeString() };
-                            return [newEntry, ...prev].slice(0, 20);
-                        });
+            // Sync Config (API Key + AutoPilot status)
+            const apiKey = localStorage.getItem('jobh_gemini_api_key') || '';
+            ipc.send('bot_update_config', { apiKey, autoPilot, occurrenceContact: pixConfig.occurrenceContact });
+        }
+    }, [owners, rentals, occurrences, autoPilot, pixConfig]); // Auto-syncs whenever these change
 
-                        if (autoPilot) {
-                            const apiKey = localStorage.getItem('jobh_gemini_api_key');
-                            if (apiKey) {
-                                showMessageAndClear(`Autônomo: Respondendo ${res.contact}...`, 'info');
-                                const aiRes = await processQueryWithAI(
-                                    `MENSAGEM RECEBIDA de ${res.contact}: "${res.lastMessage}". RESPONDA DIRETAMENTE AGORA.`,
-                                    { owners, rentals, currentMonth: selectedMonth, currentYear: selectedYear, waContext: ctx, waLog },
-                                    apiKey
-                                );
-                                if (aiRes.actions && aiRes.actions.length > 0) {
-                                    aiRes.actions.forEach(act => handleAIAction(act.name, act.params));
-                                } else if (aiRes.text && !aiRes.text.startsWith('Erro:')) {
-                                    handleAIAction('SEND_WHATSAPP', { message: aiRes.text });
-                                }
-                            }
-                        }
-                    }
-                } catch (e) { /* Erro silencioso */ }
-            }
-        }, 4000); // Frequência aumentada para 4 segundos
-        return () => clearInterval(interval);
-    }, [autoPilot, owners, rentals, selectedMonth, selectedYear]);
+    const handleToggleBot = () => {
+        const ipc = (window as any).ipcRenderer;
+        if (botStatus === 'disconnected') {
+            setBotStatus('starting');
+            setBotLogs([]);
+            ipc.send('bot_start');
+        } else {
+            ipc.send('bot_stop');
+            setBotStatus('disconnected');
+            setBotQrCode('');
+        }
+    };
+
+    // ... (rest of the file until the view render) ...
 
     // SINCRONIZAÇÃO AUTOMÁTICA COM CLOUD
     useEffect(() => {
@@ -407,18 +403,40 @@ function AppContent() {
                 isTransferred: false
             } as Rental]);
         } else {
-            const newRentals = currentRentals.map(r => ({
-                ...r,
-                id: Date.now().toString() + Math.random(),
-                month: nextMonth,
-                year: nextYear,
-                isPaid: false,
-                isTransferred: false,
-                paymentDate: undefined,
-                transferDate: undefined,
-                ownerItems: [],
-                otherItems: []
-            }));
+            const newRentals = currentRentals.map(r => {
+                const processItems = (items: (Item | undefined)[]) => {
+                    return (items || []).filter((item): item is Item => !!item).map(item => {
+                        if (item.type === 'permanent') {
+                            return { ...item, id: 'next-' + Math.random().toString(36).substr(2, 9) };
+                        }
+                        if (item.type === 'installment' && (item.currentInstallment || 1) < (item.totalInstallments || 1)) {
+                            const nextInstallment = (item.currentInstallment || 1) + 1;
+                            // Garante que a descrição tenha o formato (X de Y) atualizado
+                            const baseDesc = item.description.replace(/\s?\(\d+\s?de\s?\d+\)$/, '').trim();
+                            return {
+                                ...item,
+                                id: 'next-' + Math.random().toString(36).substr(2, 9),
+                                description: `${baseDesc} (${nextInstallment} de ${item.totalInstallments})`,
+                                currentInstallment: nextInstallment
+                            };
+                        }
+                        return null;
+                    }).filter((item): item is Item => item !== null);
+                };
+
+                return {
+                    ...r,
+                    id: Date.now().toString() + Math.random(),
+                    month: nextMonth,
+                    year: nextYear,
+                    isPaid: false,
+                    isTransferred: false,
+                    paymentDate: undefined,
+                    transferDate: undefined,
+                    ownerItems: processItems(r.ownerItems),
+                    otherItems: processItems(r.otherItems)
+                };
+            });
             setRentals(prev => [...prev, ...newRentals]);
         }
 
@@ -452,16 +470,38 @@ function AppContent() {
                     description: params.description,
                     status: 'pending',
                     type: params.type || 'maintenance',
-                    senderId: 'whatsapp_bot',
+                    senderId: 'whatsapp_bot', // Teria que pegar do waContext se possível
                     senderType: 'tenant'
                 };
                 setOccurrences(prev => [newOcc, ...prev]);
                 setCurrentView('occurrences');
-                showMessageAndClear('Ocorrência registrada!', 'info');
+                showMessageAndClear('Chamado criado automaticamente!', 'success');
+
+                if (pixConfig.occurrenceContact) {
+                    // Bot já notifica, não precisamos redirecionar aqui
+                }
                 break;
+
+            case 'UPDATE_RENTAL':
+                const { rentalId, field, value } = params;
+                setRentals(prev => prev.map(r => {
+                    if (r.id === rentalId) {
+                        let typedValue = value;
+                        // Ajuste de Tipos
+                        if (field === 'rentAmount' || field === 'dueDay') typedValue = Number(value);
+                        if (field === 'isPaid' || field === 'isTransferred') typedValue = value === true || value === 'true';
+
+                        return { ...r, [field]: typedValue };
+                    }
+                    return r;
+                }));
+                showMessageAndClear(`Cód. ${rentalId}: ${field} atualizado para ${value}`, 'success');
+                break;
+
             case 'SEND_WHATSAPP': {
                 const view = document.getElementById('wa-view') as any;
                 if (view?.tagName === 'WEBVIEW') {
+                    // ... (logica de envio no webview mantida) ...
                     const script = `(function(){
                         const input = document.querySelector('footer div[contenteditable="true"]');
                         if (!input) return false;
@@ -472,34 +512,30 @@ function AppContent() {
                         document.execCommand('delete', false, null);
                         document.execCommand('insertText', false, "${params.message.replace(/"/g, '\\"').replace(/\n/g, '\\n')}");
                         
-                        // Dispara eventos de reconhecimento de texto
                         input.dispatchEvent(new Event('input', { bubbles: true }));
                         
                         setTimeout(() => {
                             const sendBtn = document.querySelector('button span[data-icon="send"]') || 
-                                           document.querySelector('button span[data-testid="send"]') ||
-                                           document.querySelector('button[aria-label="Enviar"]') ||
-                                           document.querySelector('button[aria-label="Send"]');
+                                           document.querySelector('button[aria-label="Enviar"]'); // Aria-label é mais seguro
                             
                             if (sendBtn) {
                                 const b = sendBtn.tagName === 'BUTTON' ? sendBtn : sendBtn.closest('button');
-                                if (b) {
-                                    b.click();
-                                    // Verificação de pulso: se o texto continuar lá, tenta ENTER
-                                    setTimeout(() => {
-                                        if (input.innerText.trim().length > 0) {
-                                            const enterEvent = new KeyboardEvent('keydown', {
-                                                key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true
-                                            });
-                                            input.dispatchEvent(enterEvent);
-                                        }
-                                    }, 500);
-                                }
+                                if (b) b.click();
                             }
-                        }, 800);
+                        }, 500);
                         return true;
                     })()`;
                     await view.executeJavaScript(script).catch(() => { });
+
+                    // CRUCIAL: Salvar a resposta da IA no log para ela lembrar o que disse!
+                    setWaLog(prev => {
+                        const newEntry = {
+                            role: 'assistant' as const,
+                            content: params.message,
+                            time: new Date().toLocaleTimeString()
+                        };
+                        return [newEntry, ...prev].slice(0, 30);
+                    });
                 }
                 break;
             }
@@ -771,12 +807,63 @@ function AppContent() {
                     </div>
 
                     <div className={`absolute inset-0 p-4 transition-all duration-300 ${currentView === 'whatsapp' ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
-                        <div className="w-full h-full border-2 border-white rounded-[1.5rem] bg-white overflow-hidden shadow-2xl relative">
-                            <div className="absolute top-4 right-20 z-50 flex gap-2 no-print opacity-30 hover:opacity-100 transition-opacity">
-                                <button onClick={handleManualAnalyze} className="p-2 bg-white/80 backdrop-blur shadow-sm rounded-xl text-green-700 hover:bg-green-50 transition-colors" title="Forçar Leitura"><Sparkles size={18} /></button>
-                                <button onClick={() => (document.getElementById('wa-view') as any)?.reload()} className="p-2 bg-white/80 backdrop-blur shadow-sm rounded-xl text-green-700 hover:bg-green-50 transition-colors"><RefreshCw size={18} /></button>
-                            </div>
-                            <webview id="wa-view" src="https://web.whatsapp.com/" className="w-full h-full" useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" partition="persist:whatsapp_session" />
+                        <div className="w-full h-full border-2 border-white rounded-[1.5rem] bg-gray-900 overflow-hidden shadow-2xl relative flex flex-col items-center justify-center text-white">
+
+                            {botStatus === 'disconnected' && (
+                                <div className="text-center p-10">
+                                    <Bot size={64} className="mx-auto text-indigo-400 mb-6" />
+                                    <h2 className="text-3xl font-black mb-4">Bot Autônomo</h2>
+                                    <p className="text-gray-400 mb-8 max-w-sm mx-auto">Conecte seu WhatsApp para que a IA atenda inquilinos 24/7 sem precisar manter o app na tela.</p>
+                                    <button onClick={handleToggleBot} className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-105">
+                                        INICIAR SISTEMA
+                                    </button>
+                                </div>
+                            )}
+
+                            {botStatus === 'starting' && botQrCode && (
+                                <div className="text-center p-10 bg-white rounded-3xl animate-in fade-in zoom-in duration-300">
+                                    <img src={botQrCode} alt="QR Code" className="w-64 h-64 mb-4 mx-auto" />
+                                    <p className="text-gray-900 font-bold mb-2">Escaneie com seu WhatsApp</p>
+                                    <p className="text-gray-400 text-xs text-center px-4">Menu &gt; Aparelhos Conectados &gt; Conectar Aparelho</p>
+                                </div>
+                            )}
+
+                            {botStatus === 'starting' && !botQrCode && (
+                                <div className="flex flex-col items-center">
+                                    <RefreshCw className="animate-spin text-indigo-400 mb-4" size={32} />
+                                    <p className="font-medium text-indigo-200">Iniciando motor de IA...</p>
+                                </div>
+                            )}
+
+                            {botStatus === 'connected' && (
+                                <div className="w-full h-full flex flex-col bg-gray-950">
+                                    <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900">
+                                        <div className="flex items-center gap-3">
+                                            <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></span>
+                                            <div>
+                                                <h3 className="font-bold text-white leading-tight">Sistema Online</h3>
+                                                <p className="text-xs text-green-500 font-bold">MONITORANDO 24H</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={handleToggleBot} className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-xl text-xs font-bold transition-colors">
+                                            DESCONECTAR
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 overflow-auto p-6 space-y-3 font-mono text-xs">
+                                        {botLogs.length === 0 && <p className="text-gray-600 italic text-center mt-10">Aguardando novas mensagens...</p>}
+                                        {botLogs.map((log, i) => (
+                                            <div key={i} className={`p-3 rounded-lg border ${log.role === 'assistant' ? 'bg-indigo-900/20 border-indigo-900/50 ml-10' : 'bg-gray-800/50 border-gray-700 mr-10'}`}>
+                                                <div className="flex justify-between mb-1 opacity-50 text-[10px]">
+                                                    <span className="font-bold uppercase tracking-wider">{log.contact}</span>
+                                                    <span>{log.time}</span>
+                                                </div>
+                                                <p className={log.role === 'assistant' ? 'text-indigo-200' : 'text-gray-300'}>{log.content}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                         </div>
                     </div>
 

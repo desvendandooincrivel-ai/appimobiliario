@@ -1,145 +1,152 @@
 
 const { app, BrowserWindow, session, ipcMain } = require('electron');
 const path = require('path');
+const { fork } = require('child_process');
+const fs = require('fs');
+
+let botProcess = null;
+let mainWindow = null;
 
 function createWindow() {
-    const win = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
         title: "Jobh Imóveis Manager",
         webPreferences: {
-            nodeIntegration: true, // Habilitado para facilitar a ponte de leitura
-            contextIsolation: false, // Necessário para a injeção de script de leitura direta
-            webviewTag: true,
-            preload: path.join(__dirname, 'preload.js'),
-            partition: 'persist:whatsapp_session'
+            nodeIntegration: true,
+            contextIsolation: false,
+            // webviewTag: true, // Não vamos mais depender do webview para o bot, mas mantemos para features legadas se necessário
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 
     if (app.isPackaged) {
-        win.loadFile(path.join(__dirname, 'build', 'index.html'));
+        mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
     } else {
         const loadPage = (port) => {
-            win.loadURL(`http://localhost:${port}`).catch(() => {
+            mainWindow.loadURL(`http://localhost:${port}`).catch(() => {
                 if (port < 3005) loadPage(port + 1);
             });
         };
         loadPage(3000);
     }
 
-    // INICIATIVA: Abrir DevTools com F12 para debug do usuário
-    win.webContents.on('before-input-event', (event, input) => {
+    // Atalho F12
+    mainWindow.webContents.on('before-input-event', (event, input) => {
         if (input.key.toLowerCase() === 'f12') {
-            win.webContents.openDevTools();
+            mainWindow.webContents.openDevTools();
             event.preventDefault();
         }
     });
 
-    // APLICAR BYPASS EM TODAS AS SESSÕES (Inclusive WebViews)
-    const filter = { urls: ['https://web.whatsapp.com/*'] };
+    configureAutoUpdater(mainWindow);
+}
 
-    session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
-        const headers = details.responseHeaders;
-        const removeHeader = (name) => {
-            delete headers[name];
-            delete headers[name.toLowerCase()];
-        };
+// --- GERENCIADOR DO BOT (BACKEND) ---
 
-        removeHeader('x-frame-options');
-        removeHeader('content-security-policy');
-        removeHeader('content-security-policy-report-only');
+ipcMain.on('bot_start', () => {
+    if (botProcess) return;
 
-        callback({
-            responseHeaders: {
-                ...headers,
-                'Access-Control-Allow-Origin': ['*']
-            }
-        });
+    console.log('Iniciando Processo do Bot...');
+    const botPath = path.join(__dirname, 'bot', 'botService.js');
+
+    botProcess = fork(botPath, [], {
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc']
     });
 
-    // User Agent Moderno e Realista
-    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-    session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-        details.requestHeaders['User-Agent'] = ua;
-        callback({ cancel: false, requestHeaders: details.requestHeaders });
+    // Pular logs do bot para o console principal
+    if (botProcess.stdout) {
+        botProcess.stdout.on('data', (data) => console.log(`[BOT LOG]: ${data}`));
+    }
+    if (botProcess.stderr) {
+        botProcess.stderr.on('data', (data) => console.error(`[BOT ERR]: ${data}`));
+    }
+
+    botProcess.on('message', (msg) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('bot_event', msg);
+        }
     });
 
-    // INICIATIVA: Desativar flag de "Robot" que o WhatsApp detecta
-    app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+    botProcess.on('error', (err) => {
+        console.error('Bot Error:', err);
+    });
 
-    // AUTO UPDATER
+    botProcess.on('exit', (code) => {
+        console.log(`Bot saiu com código ${code}`);
+        botProcess = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('bot_event', { type: 'STATUS', data: 'DISCONNECTED' });
+        }
+    });
+});
+
+ipcMain.on('bot_stop', () => {
+    if (botProcess) {
+        console.log('Parando Bot...');
+        botProcess.kill();
+        botProcess = null;
+    }
+});
+
+// Ponte de Dados: React -> Bot (via Arquivo JSON)
+ipcMain.on('bot_update_data', (event, data) => {
+    if (botProcess) {
+        botProcess.send({ type: 'UPDATE_DATA', data });
+    } else {
+        // Fallback: Salva no disco mesmo sem bot rodando, para quando ele iniciar
+        try {
+            fs.writeFileSync(path.join(__dirname, 'data_snapshot.json'), JSON.stringify(data));
+        } catch (e) {
+            console.error('Erro ao salvar snapshot:', e);
+        }
+    }
+});
+
+ipcMain.on('bot_update_config', (event, data) => {
+    if (botProcess) {
+        botProcess.send({ type: 'UPDATE_CONFIG', data });
+    } else {
+        try {
+            fs.writeFileSync(path.join(__dirname, 'data_config.json'), JSON.stringify(data));
+        } catch (e) { }
+    }
+});
+
+
+// --- AUTO UPDATER ---
+function configureAutoUpdater(win) {
     const { autoUpdater } = require('electron-updater');
-
-    // Configura logs
     autoUpdater.logger = require("electron-log");
     autoUpdater.logger.transports.file.level = "info";
-
-    // DESABILITA o download automático para podermos controlar a UX (opcional, mas aqui vamos deixar auto)
     autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.autoInstallOnAppQuit = false;
 
     if (app.isPackaged) {
-        // Enviar eventos para a UI
-        autoUpdater.on('checking-for-update', () => {
-            win.webContents.send('update_status', 'Verificando atualizações...');
-        });
-
-        autoUpdater.on('update-available', (info) => {
+        autoUpdater.on('update-available', () => {
             win.webContents.send('update_available');
-            win.webContents.send('update_status', 'Atualização disponível. Baixando...');
+            win.webContents.send('update_status', 'Baixando atualização...');
         });
-
-        autoUpdater.on('update-not-available', (info) => {
-            win.webContents.send('update_status', 'Sistema atualizado.');
-        });
-
-        autoUpdater.on('error', (err) => {
-            win.webContents.send('update_error', err.toString());
-        });
-
-        autoUpdater.on('download-progress', (progressObj) => {
-            win.webContents.send('download_progress', progressObj);
-        });
-
-        autoUpdater.on('update-downloaded', (info) => {
+        autoUpdater.on('update-downloaded', () => {
             win.webContents.send('update_downloaded');
             win.webContents.send('update_status', 'Pronto para instalar.');
         });
-
-        // Não instalar sozinho ao fechar, esperar o usuário mandar
-        autoUpdater.autoInstallOnAppQuit = false;
-
-        // Tenta checar imediatamente após carregar a página
         win.webContents.on('did-finish-load', () => {
-            win.webContents.send('update_status', 'Iniciando verificação...');
-            autoUpdater.checkForUpdatesAndNotify().catch(err => {
-                console.log('Erro ao checkar updates:', err);
-                win.webContents.send('update_error', err.toString());
-            });
+            autoUpdater.checkForUpdatesAndNotify().catch(() => { });
         });
 
-        // Handler para instalar agora
-        ipcMain.on('manual_install_update', () => {
-            autoUpdater.quitAndInstall();
-        });
+        // Versão do App (Global)
+        ipcMain.handle('get_app_version', () => app.getVersion());
 
-        // Listener para verificação manual vinda do Front (se quisermos um botão "Verificar Agora")
-        ipcMain.on('manual_check_update', () => {
-            autoUpdater.checkForUpdates();
-        });
-
-        // Handler para versão
-        ipcMain.handle('get_app_version', () => {
-            return app.getVersion();
-        });
+        // --- AUTO UPDATER ---
     }
 }
 
 app.whenReady().then(() => {
-    // Limpa tudo antes de começar para não ter erro de cache
     session.defaultSession.clearCache().then(createWindow);
 });
 
 app.on('window-all-closed', () => {
+    if (botProcess) botProcess.kill();
     if (process.platform !== 'darwin') app.quit();
 });

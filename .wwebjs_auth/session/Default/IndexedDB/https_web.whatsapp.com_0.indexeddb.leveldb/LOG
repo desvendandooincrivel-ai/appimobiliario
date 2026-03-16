@@ -1,0 +1,13 @@
+2026/01/21-20:38:07.086 518c Reusing MANIFEST C:\appimobiliario\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/21-20:38:07.088 518c Recovering log #139
+2026/01/21-20:38:07.138 518c Reusing old log C:\appimobiliario\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000139.log 
+2026/01/21-20:38:09.498 2978 Level-0 table #144: started
+2026/01/21-20:38:09.543 2978 Level-0 table #144: 235669 bytes OK
+2026/01/21-20:38:09.546 2978 Delete type=0 #139
+2026/01/21-20:38:09.547 2978 Manual compaction at level-0 from '\x009\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00:\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/01/21-20:38:09.646 518c Compacting 1@1 + 1@2 files
+2026/01/21-20:38:09.766 518c Generated table #145@1: 27930 keys, 1005467 bytes
+2026/01/21-20:38:09.767 518c Compacted 1@1 + 1@2 files => 1005467 bytes
+2026/01/21-20:38:09.772 518c compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/01/21-20:38:09.773 518c Delete type=2 #141
+2026/01/21-20:38:09.774 518c Delete type=2 #144

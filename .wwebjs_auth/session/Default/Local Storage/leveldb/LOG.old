@@ -1,0 +1,6 @@
+2026/01/21-20:02:18.076 1670 Reusing MANIFEST C:\appimobiliario\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2026/01/21-20:02:18.081 1670 Recovering log #3
+2026/01/21-20:02:18.086 1670 Reusing old log C:\appimobiliario\.wwebjs_auth\session\Default\Local Storage\leveldb/000003.log 
+2026/01/21-20:04:18.766 1b3c Level-0 table #5: started
+2026/01/21-20:04:18.785 1b3c Level-0 table #5: 17805 bytes OK
+2026/01/21-20:04:18.788 1b3c Delete type=0 #3

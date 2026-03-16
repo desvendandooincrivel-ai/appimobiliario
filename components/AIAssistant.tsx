@@ -23,7 +23,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ owners, rentals, curre
     const [isOpen, setIsOpen] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
     const [showConfig, setShowConfig] = useState(false);
-    const [apiKey, setApiKey] = useState(localStorage.getItem('jobh_gemini_api_key') || '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');
+    const [apiKey, setApiKey] = useState(localStorage.getItem('jobh_gemini_api_key') || 'AIzaSyA9APkvHATnWMXUZpml-K-FKt-r4bru8lc');
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([
         { role: 'assistant', content: 'Olá! Sou o Jobh IA. Agora estou monitorando as conversas do WhatsApp em tempo real. Como posso ajudar?' }

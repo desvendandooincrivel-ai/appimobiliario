@@ -2,6 +2,9 @@ export interface Item {
   id: string;
   description: string;
   amount: number;
+  type?: 'unique' | 'permanent' | 'installment';
+  totalInstallments?: number;
+  currentInstallment?: number;
 }
 
 export interface Owner {
@@ -50,6 +53,7 @@ export interface PixConfig {
   qrCodeBase64?: string;
   pixPayload?: string;
   statementNotes?: string;
+  occurrenceContact?: string;
 }
 
 export type SortDirection = 'asc' | 'desc';
