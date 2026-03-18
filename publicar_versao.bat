@@ -1,21 +1,21 @@
 @echo off
-setlocal enabledelayedexpansion
-for /f "tokens=1,2 delims==" %%a in (publish.env) do set %%a=%%b
+:: Carrega o token do arquivo publish.env
+if exist publish.env (
+    for /f "tokens=1,2 delims==" %%a in (publish.env) do (
+        set %%a=%%b
+    )
+)
 
 echo ========================================================
 echo ========================================================
 cd /d "%~dp0"
 echo.
 echo Este script vai:
-echo 1. INCREMENTAR a versao automaticamente (ex: 0.1.0 -^> 0.1.1)
-echo 2. Gerar o novo instalador
-echo 3. Enviar para o GitHub
+echo 1. Commitar e enviar o codigo para o GitHub
+echo 2. Incrementar a versao automaticamente
+echo 3. Gerar o instalador e subir para o GitHub
 echo.
 pause
-
-setlocal disabledelayedexpansion
-set GH_TOKEN=%GH_TOKEN%
-
 
 echo.
 echo Salvando codigo no GitHub (Commit e Push)...
@@ -25,25 +25,28 @@ call git push origin main
 
 echo.
 echo Atualizando numero da versao...
-call npm version patch --no-git-tag-version
+:: Pega a versao nova para exibir no log
+for /f "tokens=*" %%i in ('npm version patch --no-git-tag-version') do set NEW_VERSION=%%i
 
 echo.
-echo Iniciando Build e Publicacao...
+echo Iniciando Build e Publicacao da %NEW_VERSION%...
 echo (Isso pode demorar alguns minutos)
 echo.
 
+:: Executa o build com o token carregado
 call npm run electron:build -- --publish always
 
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ========================================================
-    echo   SUCESSO! Versao publicada no GitHub.
+    echo   SUCESSO! Versao %NEW_VERSION% publicada no GitHub.
     echo   Seus usuarios receberao a atualizacao automaticamente.
     echo ========================================================
 ) else (
     echo.
     echo !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    echo   ERRO: Algo deu errado. Verifique as mensagens acima.
+    echo   ERRO: Algo deu errado (Erro %ERRORLEVEL%).
+    echo   Verifique se o token no publish.env e valido.
     echo !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 )
 
