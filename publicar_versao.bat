@@ -1,4 +1,7 @@
 @echo off
+setlocal enabledelayedexpansion
+for /f "tokens=1,2 delims==" %%a in (publish.env) do set %%a=%%b
+
 echo ========================================================
 echo ========================================================
 cd /d "%~dp0"
@@ -10,7 +13,9 @@ echo 3. Enviar para o GitHub
 echo.
 pause
 
-set GH_TOKEN=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
+setlocal disabledelayedexpansion
+set GH_TOKEN=%GH_TOKEN%
+
 
 echo.
 echo Salvando codigo no GitHub (Commit e Push)...
