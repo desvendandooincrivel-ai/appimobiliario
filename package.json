@@ -1,6 +1,6 @@
 {
   "name": "jobh-imoveis-manager",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "main": "main.js",
   "homepage": "./",
@@ -38,7 +38,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"cross-env BROWSER=none npm run dev\" \"electron .\"",
-    "electron:build": "npm run build && electron-builder -w"
+    "electron:build": "vite build && electron-builder -w"
   },
   "build": {
     "appId": "com.jobhimoveis.manager",
@@ -52,20 +52,20 @@
       "buildResources": "assets"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "publish": [
+        {
+          "provider": "github",
+          "owner": "desvendandooincrivel-ai",
+          "repo": "appimobiliario"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
       "artifactName": "jobh-imoveis-manager-setup-${version}.${ext}"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "desvendandooincrivel-ai",
-        "repo": "appimobiliario"
-      }
-    ]
+    }
   }
 }

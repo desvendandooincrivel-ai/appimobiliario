@@ -127,18 +127,34 @@ function configureAutoUpdater(win) {
             win.webContents.send('update_available');
             win.webContents.send('update_status', 'Baixando atualização...');
         });
+
+        autoUpdater.on('download-progress', (progressObj) => {
+            win.webContents.send('download_progress', progressObj);
+        });
+
         autoUpdater.on('update-downloaded', () => {
             win.webContents.send('update_downloaded');
             win.webContents.send('update_status', 'Pronto para instalar.');
         });
+
+        autoUpdater.on('error', (err) => {
+            console.error('Update Store Error:', err);
+            win.webContents.send('update_error', err.toString());
+        });
+
         win.webContents.on('did-finish-load', () => {
-            autoUpdater.checkForUpdatesAndNotify().catch(() => { });
+             // Delay de 5 segundos para o React carregar as UI
+            setTimeout(() => {
+                autoUpdater.checkForUpdatesAndNotify().catch(() => { });
+            }, 5000);
+        });
+
+        ipcMain.on('manual_install_update', () => {
+            autoUpdater.quitAndInstall();
         });
 
         // Versão do App (Global)
         ipcMain.handle('get_app_version', () => app.getVersion());
-
-        // --- AUTO UPDATER ---
     }
 }
 
