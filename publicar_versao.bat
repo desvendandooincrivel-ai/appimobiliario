@@ -10,7 +10,7 @@ echo 3. Enviar para o GitHub
 echo.
 pause
 
-set GH_TOKEN=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
+set GH_TOKEN=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
 
 echo.
 echo Salvando codigo no GitHub (Commit e Push)...
