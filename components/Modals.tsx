@@ -3,7 +3,7 @@ import { IconeFechar, IconeMais, IconeLixeira } from './Icons';
 import { Plus } from 'lucide-react';
 import { formatBRL } from '../utils/helpers';
 import { generateRepasseListHTML } from '../utils/reportHelper';
-import { Rental, Owner, StatementData, Item, PixConfig } from '../types';
+import { Rental, Owner, StatementData, Item, PixConfig, ContractEvent } from '../types';
 import { DEFAULT_COMPANY_NAME, DEFAULT_COMPANY_DOC, DEFAULT_COMPANY_PIX_KEY } from '../utils/constants';
 
 // --- Generic Modal ---
@@ -240,7 +240,22 @@ export const StatementSelectionModal: React.FC<{ isOpen: boolean; data: Statemen
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [notes, setNotes] = useState(pixConfig?.statementNotes || '');
 
-    useEffect(() => { if (data.rentals) setSelectedIds(data.rentals.map(r => r.id)); setNotes(pixConfig?.statementNotes || ''); }, [data, pixConfig]);
+    useEffect(() => { 
+        if (data.rentals) {
+            const today = new Date().toISOString().split('T')[0];
+            const transferredTodayIds = data.rentals.filter(r => r.transferDate && r.transferDate.startsWith(today)).map(r => r.id);
+            setSelectedIds(transferredTodayIds);
+        }
+        setNotes(pixConfig?.statementNotes || ''); 
+    }, [data, pixConfig]);
+
+    const handleSelectAll = () => {
+        if (selectedIds.length === data.rentals.length) {
+            setSelectedIds([]); // Deselect all
+        } else {
+            setSelectedIds(data.rentals.map(r => r.id)); // Select all
+        }
+    };
 
     const handleGenerate = () => {
         const selected = data.rentals.filter(r => selectedIds.includes(r.id));
@@ -253,7 +268,12 @@ export const StatementSelectionModal: React.FC<{ isOpen: boolean; data: Statemen
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Gerar Prestação de Contas">
             <div className="p-2 space-y-4">
-                <h4 className="font-medium">Selecione os repasses ({selectedMonth}/{selectedYear}):</h4>
+                <div className="flex justify-between items-center">
+                    <h4 className="font-medium">Selecione os repasses ({selectedMonth}/{selectedYear}):</h4>
+                    <button onClick={handleSelectAll} className="text-xs text-indigo-600 hover:text-indigo-800 font-bold border border-indigo-200 px-2 py-1 rounded-md">
+                        {selectedIds.length === data.rentals.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                    </button>
+                </div>
                 <div className="space-y-2 max-h-64 overflow-y-auto border p-2 rounded">
                     {data.rentals.map(r => (
                         <label key={r.id} className="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer">
@@ -274,7 +294,21 @@ export const StatementSelectionModal: React.FC<{ isOpen: boolean; data: Statemen
 
 export const ModalListaRepasse: React.FC<{ isOpen: boolean; onClose: () => void; rentalsPessoais: Rental[]; owners: Owner[]; selectedMonth: string; selectedYear: number; showMessage: (msg: string, type: 'error') => void }> = ({ isOpen, onClose, rentalsPessoais, owners, selectedMonth, selectedYear, showMessage }) => {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
-    useEffect(() => { if (rentalsPessoais) setSelectedIds(rentalsPessoais.map(r => r.id)); }, [rentalsPessoais]);
+    useEffect(() => { 
+        if (rentalsPessoais) {
+            const today = new Date().toISOString().split('T')[0];
+            const transferredTodayIds = rentalsPessoais.filter(r => r.transferDate && r.transferDate.startsWith(today)).map(r => r.id);
+            setSelectedIds(transferredTodayIds);
+        }
+    }, [rentalsPessoais]);
+
+    const handleSelectAll = () => {
+        if (selectedIds.length === rentalsPessoais.length) {
+            setSelectedIds([]); // Deselect all
+        } else {
+            setSelectedIds(rentalsPessoais.map(r => r.id)); // Select all
+        }
+    };
 
     const handleGenerate = () => {
         const selected = rentalsPessoais.filter(r => selectedIds.includes(r.id));
@@ -289,6 +323,12 @@ export const ModalListaRepasse: React.FC<{ isOpen: boolean; onClose: () => void;
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Lista de Repasse">
             <div className="p-2 space-y-4">
+                <div className="flex justify-between items-center">
+                    <h4 className="font-medium">Selecione os repasses ({selectedMonth}/{selectedYear}):</h4>
+                    <button onClick={handleSelectAll} className="text-xs text-indigo-600 hover:text-indigo-800 font-bold border border-indigo-200 px-2 py-1 rounded-md">
+                        {selectedIds.length === rentalsPessoais.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                    </button>
+                </div>
                 <div className="space-y-2 max-h-64 overflow-y-auto border p-2 rounded">
                     {rentalsPessoais.map(r => (
                         <label key={r.id} className="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer">
@@ -350,6 +390,123 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
                 <div><label>Notas Padrão (Demonstrativo)</label><textarea value={statementNotes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setStatementNotes(e.currentTarget.value)} rows={3} className="w-full p-2 border rounded" /></div>
                 <div><label>Contato para Chamados (ex: 552299999999)</label><input value={occurrenceContact} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOccurrenceContact(e.currentTarget.value)} className="w-full p-2 border rounded" placeholder="Apenas números, com DDI e DDD" /></div>
                 <div className="flex justify-end pt-2"><button onClick={handleSave} className="bg-green-600 text-white px-4 py-2 rounded">Salvar</button></div>
+            </div>
+        </Modal>
+    );
+};
+
+export const ModalMotivoAlteracao: React.FC<{ isOpen: boolean; onClose: () => void; onSave: (description: string) => void; descriptionBase: string; title?: string }> = ({ isOpen, onClose, onSave, descriptionBase, title = "Motivo da Alteração" }) => {
+    const [reason, setReason] = useState('');
+
+    const handleSave = () => {
+        if (reason.trim().length < 5) {
+            alert('Por favor, informe um motivo válido (mínimo de 5 caracteres).');
+            return;
+        }
+        onSave(reason);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+            <div className="space-y-4">
+                <div className="bg-orange-50 text-orange-800 p-4 rounded-xl border border-orange-200 text-sm font-medium">
+                    {descriptionBase}
+                </div>
+                <div>
+                    <label className="block text-sm font-black text-gray-700 mb-2">Descreva o motivo desta alteração financeira: *</label>
+                    <textarea 
+                        value={reason} 
+                        onChange={(e) => setReason(e.target.value)} 
+                        className="w-full p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
+                        rows={4}
+                        placeholder="Ex: Acordo feito via WhatsApp no dia 10/10 para desconto temporário..."
+                        required
+                    />
+                </div>
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                    <button onClick={onClose} className="px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+                    <button onClick={handleSave} className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 transition-colors">Confirmar Alteração</button>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+export const LongTermReportModal: React.FC<{ isOpen: boolean; onClose: () => void; rentals: Rental[]; events: ContractEvent[] }> = ({ isOpen, onClose, rentals, events }) => {
+    
+    // Group contracts by refNumber
+    const uniqueContracts = Array.from(new Set(rentals.map(r => r.refNumber)));
+    
+    const contractsData = uniqueContracts.map(ref => {
+        const contractRentals = rentals.filter(r => r.refNumber === ref);
+        const latestRental = contractRentals[contractRentals.length - 1]; // Just to get tenant name
+        
+        let startDate = new Date();
+        const dates = contractRentals.map(r => r.contractDate ? new Date(r.contractDate) : new Date(r.year, ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].indexOf(r.month), 1)).filter(d => !isNaN(d.getTime()));
+        
+        if (dates.length > 0) {
+            startDate = new Date(Math.min(...dates.map(d => d.getTime())));
+        }
+
+        const ageInYears = (new Date().getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+        
+        const contractEvts = events.filter(e => e.contract_id === ref);
+        const eventCount = contractEvts.length;
+        const valueChanges = contractEvts.filter(e => e.old_value !== undefined && e.new_value !== undefined).length;
+        const agreementsCount = contractEvts.filter(e => e.type === 'ACORDO_VALOR').length;
+        const totalAttachments = contractEvts.reduce((sum, e) => sum + (e.attachments ? e.attachments.length : 0), 0);
+
+        return {
+            refNumber: ref,
+            tenantName: latestRental?.tenantName || 'Desconhecido',
+            ageInYears,
+            eventCount,
+            valueChanges,
+            agreementsCount,
+            totalAttachments
+        };
+    }).filter(c => c.ageInYears >= 5).sort((a, b) => b.ageInYears - a.ageInYears);
+
+    if (!isOpen) return null;
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Relatório de Contratos de Longo Prazo (> 5 anos)">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                {contractsData.length === 0 ? (
+                    <div className="text-center p-10 text-gray-500 font-bold">
+                        Nenhum contrato com mais de 5 anos encontrado.
+                    </div>
+                ) : (
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">REF / Inquilino</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Tempo (Anos)</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Eventos</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Alt. Financeira</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Acordos</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Anexos</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {contractsData.map(c => (
+                                <tr key={c.refNumber} className="hover:bg-gray-50">
+                                    <td className="px-3 py-3 text-sm font-bold text-gray-800">LF {c.refNumber} - {c.tenantName}</td>
+                                    <td className="px-3 py-3 text-sm text-center font-bold text-indigo-600">{c.ageInYears.toFixed(1)}</td>
+                                    <td className="px-3 py-3 text-sm text-center">{c.eventCount}</td>
+                                    <td className="px-3 py-3 text-sm text-center text-orange-600 font-medium">{c.valueChanges}</td>
+                                    <td className="px-3 py-3 text-sm text-center text-purple-600 font-medium">{c.agreementsCount}</td>
+                                    <td className="px-3 py-3 text-sm text-center">{c.totalAttachments}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+            <div className="mt-6 flex justify-end">
+                <button onClick={onClose} className="px-6 py-2 bg-gray-100 font-bold rounded-xl text-gray-700">Fechar</button>
             </div>
         </Modal>
     );

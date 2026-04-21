@@ -5,17 +5,22 @@ import { useLocalStorage } from './utils/storage';
 import { loadScript, formatBRL } from './utils/helpers';
 import { gerarDocumentoPDF } from './utils/pdfHelper';
 import { sampleOwners, sampleRentals, LOCAL_STORAGE_KEY, PIX_CONFIG_KEY, DEFAULT_COMPANY_NAME, DEFAULT_COMPANY_DOC, DEFAULT_COMPANY_PIX_KEY } from './utils/constants';
-import { Owner, Rental, SortState, StatementData, ConfirmActionType, ConfirmAction, Item, PixConfig, Occurrence } from './types';
+import { Owner, Rental, SortState, StatementData, ConfirmActionType, ConfirmAction, Item, PixConfig, Occurrence, ContractEvent, ContractEventType } from './types';
 import { Message } from './components/Message';
 import { MonthYearFilters } from './components/MonthYearFilters';
 import { FinancialSummary } from './components/FinancialSummary';
 import { RentalForm, OwnerForm } from './components/Forms';
-import { Modal, ConfirmationModal, ModalAplicarMulta, ModalAplicarReajuste, ModalOtherItems, StatementSelectionModal, ModalListaRepasse, ModalConfiguracaoPix } from './components/Modals';
+import { Modal, ConfirmationModal, ModalAplicarMulta, ModalAplicarReajuste, ModalOtherItems, StatementSelectionModal, ModalListaRepasse, ModalConfiguracaoPix, ModalMotivoAlteracao, LongTermReportModal } from './components/Modals';
 import { OwnerList, RentalList } from './components/Lists';
+import { ContractTimeline } from './components/ContractTimeline';
 import { AIAssistant } from './components/AIAssistant';
 import { DocumentsView } from './components/DocumentsView';
 import { processQueryWithAI } from './utils/aiService';
-import { driveSyncService, SyncData } from './utils/driveSyncService';
+import { driveSyncService, SyncData, GoogleUser, UploadedReceipt } from './utils/driveSyncService';
+import { LoginScreen } from './components/LoginScreen';
+import { ModalAnexarComprovante, ComprovanteType } from './components/ModalAnexarComprovante';
+import { ModalDocumentosContrato } from './components/ModalDocumentosContrato';
+import { TenantDocuments, TenantDocumentFile, CaucaoType } from './types';
 
 // Error Boundary para segurança total contra telas brancas
 class ErrorHandler extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
@@ -50,6 +55,7 @@ function AppContent() {
     const [pixConfig, setPixConfig] = useLocalStorage<PixConfig>(PIX_CONFIG_KEY, {
         name: DEFAULT_COMPANY_NAME, doc: DEFAULT_COMPANY_DOC, pixKey: DEFAULT_COMPANY_PIX_KEY, qrCodeBase64: '', pixPayload: '', statementNotes: ''
     });
+    const [contractEvents, setContractEvents] = useLocalStorage<ContractEvent[]>('contract_events_app1', []);
 
     const [zoomLevel, setZoomLevel] = useLocalStorage<number>('app_zoom_level', 1.0);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -62,15 +68,37 @@ function AppContent() {
     const [isPixConfigModalOpen, setIsPixConfigModalOpen] = useState(false);
     const [isRepasseListModalOpen, setIsRepasseListModalOpen] = useState(false);
     const [isReajusteModalOpen, setIsReajusteModalOpen] = useState(false);
+    const [isLongTermReportModalOpen, setIsLongTermReportModalOpen] = useState(false);
     const [reajusteRental, setReajusteRental] = useState<Rental | null>(null);
 
     const [editingRental, setEditingRental] = useState<Rental | null>(null);
     const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
+    const [timelineRental, setTimelineRental] = useState<Rental | null>(null);
+    const [pendingUpdate, setPendingUpdate] = useState<{ id: string, fields: Partial<Rental>, oldData: Rental, changedFields: string[], descriptionBase: string } | null>(null);
     const [confirmAction, setConfirmAction] = useState<ConfirmAction>({ type: null, id: null, data: null });
+
+    // Comprovante state
+    const [comprovanteContext, setComprovanteContext] = useState<{
+        rental: Rental;
+        type: ComprovanteType;
+        fields: Partial<Rental>;
+        ownerName?: string;
+    } | null>(null);
+    const [isUploadingComprovante, setIsUploadingComprovante] = useState(false);
+    const [uploadedComprovanteUrl, setUploadedComprovanteUrl] = useState<string | null>(null);
+
+    // Documentos do Contrato state
+    const [tenantDocuments, setTenantDocuments] = useLocalStorage<TenantDocuments[]>('tenant_documents_app1', []);
+    const [documentosRental, setDocumentosRental] = useState<Rental | null>(null);
+    const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
     const [libsLoaded, setLibsLoaded] = useState(false);
     const [waLog, setWaLog] = useState<{ role: 'user' | 'assistant', contact?: string, content: string, time: string }[]>([]);
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
+    const [googleUser, setGoogleUser] = useLocalStorage<GoogleUser | null>('google_user_info', null);
+    const [loginLoading, setLoginLoading] = useState(false);
+    const [loginError, setLoginError] = useState<string | null>(null);
+    const [isLoadingFromDrive, setIsLoadingFromDrive] = useState(false);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloaded'>('idle');
     const [downloadProgress, setDownloadProgress] = useState(0);
     const [appVersion, setAppVersion] = useState('0.1.x');
@@ -124,6 +152,75 @@ function AppContent() {
             ipc.invoke('get_app_version').then((v: string) => setAppVersion(v));
         }
     }, []);
+
+    // --- GOOGLE LOGIN & DRIVE SYNC ---
+    const handleGoogleLogin = async () => {
+        setLoginLoading(true);
+        setLoginError(null);
+        try {
+            const token = await driveSyncService.authenticate();
+            setDriveToken(token);
+
+            const user = await driveSyncService.getUserInfo(token);
+            if (user) setGoogleUser(user);
+
+            // Load remote state
+            setIsLoadingFromDrive(true);
+            const remoteState = await driveSyncService.getRemoteState(token);
+            if (remoteState) {
+                if (remoteState.owners?.length) setOwners(remoteState.owners);
+                if (remoteState.rentals?.length) setRentals(remoteState.rentals);
+                if (remoteState.occurrences?.length) setOccurrences(remoteState.occurrences);
+                if (remoteState.pixConfig) setPixConfig(remoteState.pixConfig);
+                if (remoteState.contractEvents?.length) setContractEvents(remoteState.contractEvents);
+                showMessageAndClear(`Dados sincronizados do Drive! Última atualização: ${new Date(remoteState.lastUpdated).toLocaleString('pt-BR')}`, 'success');
+            } else {
+                showMessageAndClear(`Bem-vindo, ${user?.name || 'usuário'}! Nenhum dado anterior no Drive. Começando do zero.`, 'info');
+            }
+            setIsLoadingFromDrive(false);
+        } catch (err: any) {
+            console.error('Login error:', err);
+            setLoginError(typeof err === 'string' ? err : 'Erro ao fazer login. Tente novamente.');
+        } finally {
+            setLoginLoading(false);
+        }
+    };
+
+    const handleLogout = () => {
+        if ((window as any).google?.accounts?.oauth2) {
+            (window as any).google.accounts.oauth2.revoke(driveToken, () => {});
+        }
+        setDriveToken(null);
+        setGoogleUser(null);
+        setCloudSyncStatus('idle');
+    };
+
+    // Auto-save to Drive whenever data changes
+    const syncToDrive = async (token: string) => {
+        if (!token) return;
+        setCloudSyncStatus('syncing');
+        const ok = await driveSyncService.saveState(token, {
+            owners,
+            rentals,
+            occurrences,
+            pixConfig,
+            contractEvents,
+            lastUpdated: new Date().toISOString(),
+        });
+        setCloudSyncStatus(ok ? 'success' : 'error');
+        if (ok) setTimeout(() => setCloudSyncStatus('idle'), 3000);
+    };
+
+    // Debounced auto-sync
+    const syncTimeoutRef = React.useRef<any>(null);
+    useEffect(() => {
+        if (!driveToken) return;
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = setTimeout(() => {
+            syncToDrive(driveToken);
+        }, 2000); // 2s debounce
+        return () => clearTimeout(syncTimeoutRef.current);
+    }, [owners, rentals, occurrences, pixConfig, contractEvents, driveToken]);
 
     // --- BOT HEADLESS INTEGRATION ---
     const [botStatus, setBotStatus] = useState<'disconnected' | 'starting' | 'connected'>('disconnected');
@@ -274,6 +371,50 @@ function AppContent() {
         });
     }, [rentalsForMonthAndYear, selectedMonth, selectedYear, monthOrder]);
 
+    const missingDocumentsRentals = useMemo(() => {
+        const result: (Rental & { missingDocs?: string[] })[] = [];
+        for (const r of rentalsForMonthAndYear) {
+            const missing: string[] = [];
+            const docs = tenantDocuments.find(d => d.contract_id === r.refNumber);
+            
+            if (!docs || !docs.contratoAluguel) missing.push('Contrato');
+            if (!docs || !docs.entregaChaves) missing.push('Chaves');
+            if (!docs || !docs.laudoVistoria) missing.push('Vistoria');
+            if (!docs || !docs.caucao) missing.push('Caução');
+
+            // Comprovante de Pagamento
+            if (r.isPaid) {
+                const hasPag = contractEvents.some(e => 
+                    e.contract_id === r.refNumber && 
+                    e.type === 'PAGAMENTO_REGISTRADO' && 
+                    e.description.includes(r.month) && 
+                    e.description.includes(r.year.toString()) && 
+                    e.description.includes('Aluguel') && 
+                    e.attachments && e.attachments.length > 0
+                );
+                if (!hasPag) missing.push('Compr. Aluguel');
+            }
+
+            // Comprovante de Repasse
+            if (r.isTransferred) {
+                const hasRep = contractEvents.some(e => 
+                    e.contract_id === r.refNumber && 
+                    e.type === 'PAGAMENTO_REGISTRADO' && 
+                    e.description.includes(r.month) && 
+                    e.description.includes(r.year.toString()) && 
+                    e.description.includes('Repasse') && 
+                    e.attachments && e.attachments.length > 0
+                );
+                if (!hasRep) missing.push('Compr. Repasse');
+            }
+
+            if (missing.length > 0) {
+                result.push({ ...r, missingDocs: missing });
+            }
+        }
+        return result;
+    }, [rentalsForMonthAndYear, tenantDocuments, contractEvents]);
+
     const showMessageAndClear = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
         setMessage(msg); setMessageType(type);
     };
@@ -283,7 +424,228 @@ function AppContent() {
     const [currentStatementData, setCurrentStatementData] = useState<StatementData>({ ownerId: '', rentals: [] });
 
     const handleUpdateRental = (id: string, fields: Partial<Rental>) => {
+        const oldRental = rentals.find(r => r.id === id);
+        if (!oldRental) return;
+
+        const financialFields: (keyof Rental)[] = ['rentAmount', 'waterBill', 'condoFee', 'iptu', 'gasBill'];
+        let changed = false;
+        let descriptionBase = '';
+        const changedFields: string[] = [];
+
+        financialFields.forEach(f => {
+            if (fields[f] !== undefined && fields[f] !== oldRental[f]) {
+                changed = true;
+                changedFields.push(f as string);
+                descriptionBase += `Alterou ${f}: ${formatBRL(Number(oldRental[f]) || 0)} ➔ ${formatBRL(Number(fields[f]) || 0)}. `;
+            }
+        });
+
+        if (fields.isPaid !== undefined && fields.isPaid !== oldRental.isPaid) {
+            if (fields.isPaid) {
+                fields.paymentDate = new Date().toISOString();
+                const dataFormatada = new Date().toLocaleDateString('pt-BR');
+                const newEvent: ContractEvent = {
+                    id: Date.now().toString() + Math.random(),
+                    contract_id: oldRental.refNumber,
+                    tenant_id: oldRental.tenantName,
+                    type: 'PAGAMENTO_REGISTRADO',
+                    description: `Aluguel referente a ${oldRental.month}/${oldRental.year} recebido no dia ${dataFormatada}.`,
+                    created_by: 'Sistema',
+                    created_at: new Date().toISOString()
+                };
+                setContractEvents(prev => [...prev, newEvent]);
+                // Show receipt modal BEFORE saving
+                setUploadedComprovanteUrl(null);
+                setComprovanteContext({ rental: oldRental, type: 'pagamento', fields });
+                return; // Will be finalized after modal
+            } else {
+                fields.paymentDate = undefined;
+            }
+        }
+
+        if (fields.isTransferred !== undefined && fields.isTransferred !== oldRental.isTransferred) {
+            if (fields.isTransferred) {
+                fields.transferDate = new Date().toISOString();
+                const dataFormatada = new Date().toLocaleDateString('pt-BR');
+                const newEvent: ContractEvent = {
+                    id: Date.now().toString() + Math.random(),
+                    contract_id: oldRental.refNumber,
+                    tenant_id: oldRental.tenantName,
+                    type: 'OUTRO',
+                    description: `Repasse referente a ${oldRental.month}/${oldRental.year} realizado no dia ${dataFormatada}.`,
+                    created_by: 'Sistema',
+                    created_at: new Date().toISOString()
+                };
+                setContractEvents(prev => [...prev, newEvent]);
+                // Show receipt modal BEFORE saving
+                setUploadedComprovanteUrl(null);
+                setComprovanteContext({ rental: oldRental, type: 'repasse', fields, ownerName: oldRental.owner });
+                return; // Will be finalized after modal
+            } else {
+                fields.transferDate = undefined;
+            }
+        }
+
+        if (changed) {
+            setPendingUpdate({ id, fields, oldData: oldRental, changedFields, descriptionBase });
+        } else {
+            setRentals(prev => prev.map(r => r.id === id ? { ...r, ...fields } : r));
+        }
+    };
+
+    // Called when user confirms comprovante modal (with or without file)
+    const handleComprovanteConfirm = async (file: File | null) => {
+        if (!comprovanteContext) return;
+        const { rental, type, fields, ownerName } = comprovanteContext;
+
+        setIsUploadingComprovante(true);
+        let receiptUrl: string | null = null;
+        const dataFormatada = new Date().toLocaleDateString('pt-BR');
+
+        if (file && driveToken) {
+            try {
+                let folderId: string | null = null;
+                const ext = file.name.split('.').pop() || 'pdf';
+                const nomeArquivo = type === 'pagamento'
+                    ? `${rental.month}.${ext}`
+                    : `LF${rental.refNumber} ${rental.tenantName}.${ext}`;
+
+                if (type === 'pagamento') {
+                    // Inquilinos / LF001 - João / Comprovantes de Pagamento / 2025
+                    folderId = await driveSyncService.getInquilinoComprovantePagamentoFolder(
+                        driveToken, rental.refNumber, rental.tenantName, rental.year
+                    );
+                } else {
+                    // Proprietários / [Owner] / Comprovantes de Repasse / [Ano] / [Mês]
+                    folderId = await driveSyncService.getProprietarioRepasseMonthFolder(
+                        driveToken, ownerName || rental.owner, rental.year, rental.month
+                    );
+                }
+
+                if (folderId) {
+                    const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, file, nomeArquivo);
+                    if (uploaded) {
+                        receiptUrl = uploaded.webViewLink;
+                        setUploadedComprovanteUrl(receiptUrl);
+                    }
+                }
+            } catch (err) {
+                console.error('Erro no upload do comprovante:', err);
+            }
+        }
+
+        // Create the event with attachment if uploaded
+        const newEvent: ContractEvent = {
+            id: Date.now().toString() + Math.random(),
+            contract_id: rental.refNumber,
+            tenant_id: rental.tenantName,
+            type: type === 'pagamento' ? 'PAGAMENTO_REGISTRADO' : 'OUTRO',
+            description: type === 'pagamento'
+                ? `Aluguel referente a ${rental.month}/${rental.year} recebido no dia ${dataFormatada}.${receiptUrl ? ' Comprovante anexado.' : ''}`
+                : `Repasse referente a ${rental.month}/${rental.year} realizado no dia ${dataFormatada}.${receiptUrl ? ' Comprovante anexado.' : ''}`,
+            created_by: 'Sistema',
+            created_at: new Date().toISOString(),
+            attachments: receiptUrl ? [{
+                id: Date.now().toString(),
+                event_id: '',
+                file_url: receiptUrl,
+                file_type: file?.type || 'application/octet-stream',
+                description: `Comprovante de ${type === 'pagamento' ? 'Pagamento' : 'Repasse'} - ${rental.month}/${rental.year}`,
+                created_at: new Date().toISOString(),
+            }] : undefined,
+        };
+        setContractEvents(prev => [...prev, newEvent]);
+
+        // Apply the actual field change
+        setRentals(prev => prev.map(r => r.id === rental.id ? { ...r, ...fields } : r));
+        setIsUploadingComprovante(false);
+
+        if (!file || receiptUrl) {
+            // Close modal if skipped or upload succeeded
+            if (receiptUrl) {
+                showMessageAndClear(`Comprovante enviado para o Drive! 📁`, 'success');
+            }
+            if (!file) {
+                setComprovanteContext(null);
+                setUploadedComprovanteUrl(null);
+            }
+        } else {
+            showMessageAndClear('Erro ao enviar comprovante, mas o pagamento foi registrado.', 'error');
+            setComprovanteContext(null);
+        }
+    };
+
+    // --- DOCUMENTOS DO CONTRATO ---
+    const handleDocumentUpload = async (
+        docType: keyof Omit<TenantDocuments, 'contract_id' | 'caucao'> | 'caucaoFile',
+        file: File,
+        caucaoType?: CaucaoType
+    ) => {
+        if (!documentosRental || !driveToken) return;
+        setUploadingDocType(docType);
+        try {
+            const folderId = await driveSyncService.getInquilinoDocumentosContratoFolder(
+                driveToken, documentosRental.refNumber, documentosRental.tenantName
+            );
+            if (!folderId) { showMessageAndClear('Erro ao acessar pasta do Drive.', 'error'); return; }
+            const ext = file.name.split('.').pop() || 'pdf';
+            const labelMap: Record<string, string> = {
+                contratoAluguel: 'Contrato de Aluguel',
+                entregaChaves: 'Entrega de Chaves',
+                laudoVistoria: 'Laudo de Vistoria',
+                caucaoFile: caucaoType ? `Caucao - ${caucaoType}` : 'Caucao',
+            };
+            const fileName = `${labelMap[docType] || docType}.${ext}`;
+            const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, file, fileName);
+            if (!uploaded) { showMessageAndClear('Erro ao enviar arquivo.', 'error'); return; }
+            const docFile: TenantDocumentFile = {
+                fileUrl: uploaded.fileUrl, fileName: uploaded.fileName,
+                uploadedAt: new Date().toISOString(), driveFileId: uploaded.fileId, webViewLink: uploaded.webViewLink,
+            };
+            setTenantDocuments(prev => {
+                const existing = prev.find(d => d.contract_id === documentosRental.refNumber);
+                if (docType === 'caucaoFile') {
+                    const updated = { ...existing, contract_id: documentosRental.refNumber, caucao: { type: caucaoType || existing?.caucao?.type || 'recibo', file: docFile } } as TenantDocuments;
+                    return existing ? prev.map(d => d.contract_id === documentosRental.refNumber ? updated : d) : [...prev, updated];
+                }
+                const updated = { ...existing, contract_id: documentosRental.refNumber, [docType]: docFile } as TenantDocuments;
+                return existing ? prev.map(d => d.contract_id === documentosRental.refNumber ? updated : d) : [...prev, updated];
+            });
+            showMessageAndClear(`${labelMap[docType]} enviado com sucesso! 📁`, 'success');
+        } finally { setUploadingDocType(null); }
+    };
+
+    const handleSetCaucaoType = (type: CaucaoType) => {
+        if (!documentosRental) return;
+        setTenantDocuments(prev => {
+            const existing = prev.find(d => d.contract_id === documentosRental.refNumber);
+            const updated = { ...existing, contract_id: documentosRental.refNumber, caucao: { type, file: existing?.caucao?.file } } as TenantDocuments;
+            return existing ? prev.map(d => d.contract_id === documentosRental.refNumber ? updated : d) : [...prev, updated];
+        });
+    };
+
+    const confirmPendingUpdate = (reason: string) => {
+        if (!pendingUpdate) return;
+        const { id, fields, oldData } = pendingUpdate;
+
+        const mainChangedField = pendingUpdate.changedFields.includes('rentAmount') ? 'rentAmount' : pendingUpdate.changedFields[0];
+        
+        const newEvent: ContractEvent = {
+            id: Date.now().toString() + Math.random(),
+            contract_id: oldData.refNumber,
+            tenant_id: oldData.tenantName,
+            type: 'ACORDO_VALOR',
+            description: `${pendingUpdate.descriptionBase}\nMotivo: ${reason}`,
+            old_value: oldData[mainChangedField as keyof Rental] as any,
+            new_value: fields[mainChangedField as keyof Rental] as any,
+            created_by: 'Usuário',
+            created_at: new Date().toISOString()
+        };
+
+        setContractEvents(prev => [...prev, newEvent]);
         setRentals(prev => prev.map(r => r.id === id ? { ...r, ...fields } : r));
+        setPendingUpdate(null);
+        showMessageAndClear('Alteração registrada no prontuário!', 'success');
     };
 
     const handleGenerateStatement = (ownerId: string) => {
@@ -355,6 +717,21 @@ function AppContent() {
     };
 
     const handleSaveReajuste = (rentalId: string, newRentAmount: number, description: string, year: number) => {
+        const oldRental = rentals.find(r => r.id === rentalId);
+        if (oldRental) {
+            const newEvent: ContractEvent = {
+                id: Date.now().toString() + Math.random(),
+                contract_id: oldRental.refNumber,
+                tenant_id: oldRental.tenantName,
+                type: 'REAJUSTE_ALUGUEL',
+                description: `Reajuste aplicado: ${description}`,
+                old_value: oldRental.rentAmount,
+                new_value: newRentAmount,
+                created_by: 'Usuário',
+                created_at: new Date().toISOString()
+            };
+            setContractEvents(prev => [...prev, newEvent]);
+        }
         setRentals(prev => prev.map(r => r.id === rentalId ? { ...r, rentAmount: newRentAmount, rentDescription: description, lastAdjustmentYear: year } : r));
         showMessageAndClear('Reajuste aplicado com sucesso!', 'success');
         setIsReajusteModalOpen(false); setReajusteRental(null);
@@ -557,25 +934,7 @@ function AppContent() {
         }
     };
 
-    const handleGoogleLogin = async () => {
-        try {
-            setCloudSyncStatus('syncing');
-            const token = await driveSyncService.authenticate();
-            setDriveToken(token);
-            setCloudSyncStatus('success');
-            showMessageAndClear('Conectado ao Google Drive!', 'success');
-        } catch (error) {
-            setCloudSyncStatus('error');
-            showMessageAndClear('Erro ao conectar com Google.', 'error');
-            console.error(error);
-        }
-    };
 
-    const handleGoogleLogout = () => {
-        setDriveToken(null);
-        setCloudSyncStatus('idle');
-        showMessageAndClear('Desconectado do Google Drive.', 'info');
-    };
 
     const handleExportData = () => {
         const data = {
@@ -617,6 +976,32 @@ function AppContent() {
         e.target.value = '';
     };
 
+    // Show login screen if not authenticated (allow skip)
+    if (!driveToken && !googleUser) {
+        return (
+            <LoginScreen
+                onLogin={handleGoogleLogin}
+                onContinueOffline={() => {
+                    // Mark as "offline mode" so the gate doesn't block
+                    setGoogleUser({ name: 'Usuário Local', email: '', picture: '' });
+                }}
+                isLoading={loginLoading}
+                error={loginError}
+            />
+        );
+    }
+
+    // Loading from Drive
+    if (isLoadingFromDrive) {
+        return (
+            <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center gap-4">
+                <div className="w-16 h-16 border-4 border-indigo-300 border-t-white rounded-full animate-spin" />
+                <p className="text-white font-bold text-xl">Carregando seus dados do Drive...</p>
+                <p className="text-indigo-300 text-sm">Aguarde um momento</p>
+            </div>
+        );
+    }
+
     return (
         <div className="flex bg-gray-100 font-sans min-h-screen text-gray-900" style={{ zoom: zoomLevel }}>
             <nav className="w-64 bg-white border-r flex flex-col no-print shadow-xl z-30">
@@ -625,6 +1010,20 @@ function AppContent() {
                         <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">J</div>
                         <span className="text-xl font-black text-indigo-700 tracking-tighter uppercase">Jobh</span>
                     </div>
+                    {/* User profile mini card */}
+                    {googleUser && (
+                        <div className="mt-3 flex items-center gap-2 p-2 bg-indigo-50 rounded-xl border border-indigo-100">
+                            {googleUser.picture ? (
+                                <img src={googleUser.picture} alt={googleUser.name} className="w-8 h-8 rounded-full border-2 border-indigo-200" referrerPolicy="no-referrer" />
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-indigo-200 flex items-center justify-center text-indigo-700 font-bold text-sm">{googleUser.name?.[0]}</div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                                <p className="text-xs font-black text-indigo-800 truncate">{googleUser.name}</p>
+                                <p className="text-[9px] text-indigo-400 truncate">{googleUser.email}</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <ul className="flex-1 px-4 py-2 space-y-1">
                     <NavItem icon={<Home size={18} />} label="Início" active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
@@ -653,6 +1052,18 @@ function AppContent() {
                         <button onClick={() => setZoomLevel(z => Math.min(2, z + 0.1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><ZoomIn size={16} /></button>
                     </div>
                 </div>
+                {/* Logout button */}
+                {googleUser && (
+                    <div className="px-6 pb-4">
+                        <button
+                            onClick={handleLogout}
+                            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-red-50 text-red-600 border border-red-100 rounded-xl text-xs font-black hover:bg-red-100 transition-colors"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                            Sair da conta
+                        </button>
+                    </div>
+                )}
             </nav>
 
             <main className="flex-1 flex flex-col relative overflow-hidden">
@@ -661,12 +1072,22 @@ function AppContent() {
                     <h1 className="text-2xl font-black text-gray-800 tracking-tight capitalize">{currentView}</h1>
                     <div className="flex items-center gap-6">
                         {driveToken && (
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 rounded-xl border border-indigo-100 transition-all">
-                                <Cloud className={`text-indigo-600 ${cloudSyncStatus === 'syncing' ? 'animate-bounce' : ''}`} size={16} />
-                                <span className="text-[9px] font-black text-indigo-700 uppercase tracking-tighter">
-                                    {cloudSyncStatus === 'syncing' ? 'Sincronizando...' : cloudSyncStatus === 'error' ? 'Erro Sync' : 'Nuvem Ativa'}
-                                </span>
-                            </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all"
+                        style={{
+                            background: cloudSyncStatus === 'error' ? '#fef2f2' : cloudSyncStatus === 'success' ? '#f0fdf4' : '#eef2ff',
+                            borderColor: cloudSyncStatus === 'error' ? '#fecaca' : cloudSyncStatus === 'success' ? '#bbf7d0' : '#c7d2fe',
+                        }}
+                    >
+                        <Cloud
+                            className={cloudSyncStatus === 'syncing' ? 'animate-pulse text-indigo-500' : cloudSyncStatus === 'error' ? 'text-red-500' : 'text-green-500'}
+                            size={15}
+                        />
+                        <span className={`text-[9px] font-black uppercase tracking-tighter ${
+                            cloudSyncStatus === 'error' ? 'text-red-600' : cloudSyncStatus === 'success' ? 'text-green-600' : 'text-indigo-700'
+                        }`}>
+                            {cloudSyncStatus === 'syncing' ? 'Salvando...' : cloudSyncStatus === 'error' ? 'Erro Sync' : cloudSyncStatus === 'success' ? 'Salvo ✓' : 'Drive Ativo'}
+                        </span>
+                    </div>
                         )}
                         <button
                             onClick={() => setAutoPilot(!autoPilot)}
@@ -705,52 +1126,100 @@ function AppContent() {
                             />
                             <FinancialSummary rentals={rentalsForMonthAndYear} />
 
-                            {statusCounts.vencidos.length === 0 && statusCounts.pagosNaoRepassados.length === 0 && statusCounts.pendentes.length === 0 && pendingAdjustments.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] shadow-xl border border-green-100 transition-all">
-                                    <div className="bg-green-50 p-6 rounded-full mb-6 animate-bounce">
-                                        <Sparkles size={48} className="text-green-600" />
+                            {(() => {
+                                const visibleWidgetsCount = [
+                                    statusCounts.vencidos.length > 0,
+                                    statusCounts.pagosNaoRepassados.length > 0,
+                                    statusCounts.pendentes.length > 0,
+                                    pendingAdjustments.length > 0,
+                                    missingDocumentsRentals.length > 0
+                                ].filter(Boolean).length;
+
+                                if (visibleWidgetsCount === 0) {
+                                    return (
+                                        <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] shadow-xl border border-green-100 transition-all">
+                                            <div className="bg-green-50 p-6 rounded-full mb-6 animate-bounce">
+                                                <Sparkles size={48} className="text-green-600" />
+                                            </div>
+                                            <h3 className="text-3xl font-black text-gray-800 mb-2">Tudo em dia! 🎉</h3>
+                                            <p className="text-gray-400 font-bold">Nenhuma pendência encontrada para este mês.</p>
+                                        </div>
+                                    );
+                                }
+
+                                const gridClass = visibleWidgetsCount === 1 ? "grid grid-cols-1 max-w-md mx-auto gap-6 items-start"
+                                    : visibleWidgetsCount === 2 ? "grid grid-cols-1 md:grid-cols-2 max-w-4xl mx-auto gap-6 items-start"
+                                    : visibleWidgetsCount === 3 ? "grid grid-cols-1 md:grid-cols-3 max-w-6xl mx-auto gap-6 items-start"
+                                    : visibleWidgetsCount === 4 ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start"
+                                    : "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 items-start";
+
+                                return (
+                                    <div className={gridClass}>
+                                        {statusCounts.vencidos.length > 0 && (
+                                            <StatusWidget
+                                                title="Vencidos"
+                                                items={statusCounts.vencidos}
+                                                color="red"
+                                                actionLabel="Pago"
+                                                onAction={(id: string) => handleUpdateRental(id, { isPaid: true })}
+                                                emptyText="Tudo em dia!"
+                                            />
+                                        )}
+                                        {statusCounts.pagosNaoRepassados.length > 0 && (
+                                            <StatusWidget
+                                                title="Pend. Repasse"
+                                                items={statusCounts.pagosNaoRepassados}
+                                                color="yellow"
+                                                actionLabel="Repassado"
+                                                onAction={(id: string) => handleUpdateRental(id, { isTransferred: true })}
+                                                emptyText="Todos repassados!"
+                                            />
+                                        )}
+                                        {statusCounts.pendentes.length > 0 && (
+                                            <StatusWidget
+                                                title="A Vencer / Pendente"
+                                                items={statusCounts.pendentes}
+                                                color="blue"
+                                                actionLabel="Pago"
+                                                onAction={(id: string) => handleUpdateRental(id, { isPaid: true })}
+                                                emptyText="Nenhum pendente."
+                                            />
+                                        )}
+                                        {pendingAdjustments.length > 0 && (
+                                            <StatusWidget
+                                                title="Próximos Reajustes"
+                                                items={pendingAdjustments}
+                                                color="purple"
+                                                actionLabel="Reajustar"
+                                                onAction={handleOpenReajuste}
+                                                emptyText=""
+                                            />
+                                        )}
+                                        {missingDocumentsRentals.length > 0 && (
+                                            <StatusWidget
+                                                title="Docs. Faltando"
+                                                items={missingDocumentsRentals}
+                                                color="orange"
+                                                actionLabel="Resolver"
+                                                onAction={(id: string) => {
+                                                    const r = missingDocumentsRentals.find(x => x.id === id);
+                                                    if (!r) return;
+                                                    
+                                                    if (r.missingDocs?.includes('Compr. Aluguel')) {
+                                                        setComprovanteContext({ rental: r, type: 'pagamento', fields: {} });
+                                                    } else if (r.missingDocs?.includes('Compr. Repasse')) {
+                                                        const owner = owners.find(o => o.name === r.owner);
+                                                        setComprovanteContext({ rental: r, type: 'repasse', fields: {}, ownerName: owner?.name });
+                                                    } else {
+                                                        setDocumentosRental(r);
+                                                    }
+                                                }}
+                                                emptyText="Tudo completo!"
+                                            />
+                                        )}
                                     </div>
-                                    <h3 className="text-3xl font-black text-gray-800 mb-2">Tudo em dia! 🎉</h3>
-                                    <p className="text-gray-400 font-bold">Nenhuma pendência encontrada para este mês.</p>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
-                                    <StatusWidget
-                                        title="Vencidos"
-                                        items={statusCounts.vencidos}
-                                        color="red"
-                                        actionLabel="Pago"
-                                        onAction={(id: string) => handleUpdateRental(id, { isPaid: true })}
-                                        emptyText="Tudo em dia!"
-                                    />
-                                    <StatusWidget
-                                        title="Pend. Repasse"
-                                        items={statusCounts.pagosNaoRepassados}
-                                        color="yellow"
-                                        actionLabel="Repassado"
-                                        onAction={(id: string) => handleUpdateRental(id, { isTransferred: true })}
-                                        emptyText="Todos repassados!"
-                                    />
-                                    <StatusWidget
-                                        title="A Vencer / Pendente"
-                                        items={statusCounts.pendentes}
-                                        color="blue"
-                                        actionLabel="Pago"
-                                        onAction={(id: string) => handleUpdateRental(id, { isPaid: true })}
-                                        emptyText="Nenhum pendente."
-                                    />
-                                    {pendingAdjustments.length > 0 && (
-                                        <StatusWidget
-                                            title="Próximos Reajustes"
-                                            items={pendingAdjustments}
-                                            color="purple"
-                                            actionLabel="Reajustar"
-                                            onAction={handleOpenReajuste}
-                                            emptyText=""
-                                        />
-                                    )}
-                                </div>
-                            )}
+                                );
+                            })()}
                         </div>
                     </div>
 
@@ -758,7 +1227,10 @@ function AppContent() {
                         <div className="space-y-8">
                             <div className="flex justify-between items-center">
                                 <h2 className="text-2xl font-black text-gray-800">Inquilinos</h2>
-                                <button onClick={() => setIsRentalModalOpen(true)} className="bg-indigo-600 text-white px-8 py-3 rounded-[1.5rem] font-black shadow-2xl shadow-indigo-200">NOVO REGISTRO</button>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setIsLongTermReportModalOpen(true)} className="bg-white border border-gray-200 text-indigo-600 px-6 py-3 rounded-[1.5rem] font-black shadow-sm hover:bg-gray-50 transition-colors uppercase">Relatório Longo Prazo</button>
+                                    <button onClick={() => setIsRentalModalOpen(true)} className="bg-indigo-600 text-white px-8 py-3 rounded-[1.5rem] font-black shadow-2xl shadow-indigo-200">NOVO REGISTRO</button>
+                                </div>
                             </div>
                             <RentalList
                                 title="Planilha"
@@ -774,6 +1246,8 @@ function AppContent() {
                                 onSort={handleSort}
                                 onOpenItemsModal={(config) => setItemsConfig(config)}
                                 onAplicarMulta={() => { }}
+                                onViewTimeline={(r) => setTimelineRental(r)}
+                                onOpenDocumentos={(r) => setDocumentosRental(r)}
                             />
                         </div>
                     </div>
@@ -802,7 +1276,7 @@ function AppContent() {
                         <DocumentsView
                             driveToken={driveToken}
                             onLogin={handleGoogleLogin}
-                            onLogout={handleGoogleLogout}
+                            onLogout={handleLogout}
                         />
                     </div>
 
@@ -917,7 +1391,11 @@ function AppContent() {
             }} onCancel={() => setIsConfirmModalOpen(false)} />}
 
             {isRentalModalOpen && <RentalForm isOpen={isRentalModalOpen} onClose={() => setIsRentalModalOpen(false)} onSubmit={(data) => {
-                setRentals(prev => editingRental ? prev.map(r => r.id === editingRental.id ? { ...r, ...data } : r) : [...prev, { ...data, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
+                if (editingRental) {
+                    handleUpdateRental(editingRental.id, data);
+                } else {
+                    setRentals(prev => [...prev, { ...data, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
+                }
                 setIsRentalModalOpen(false); setEditingRental(null);
             }} initialData={editingRental || undefined} owners={owners} showMessage={showMessageAndClear} />}
 
@@ -980,6 +1458,94 @@ function AppContent() {
             )}
 
             {isStatementModalOpen && <StatementSelectionModal isOpen={isStatementModalOpen} data={currentStatementData} owners={owners} selectedMonth={selectedMonth} selectedYear={selectedYear} onClose={() => setIsStatementModalOpen(false)} showMessage={showMessageAndClear} onGenerateStatementWithNotes={handleGenerateStatementWithNotes} pixConfig={pixConfig} />}
+            
+            <ContractTimeline
+                isOpen={!!timelineRental}
+                onClose={() => setTimelineRental(null)}
+                events={timelineRental ? contractEvents.filter(e => e.contract_id === timelineRental.refNumber) : []}
+                contractRef={timelineRental?.refNumber || ''}
+                onAddEvent={async (evt) => {
+                    if (!timelineRental) return;
+                    
+                    const finalAttachments = [];
+                    for (const att of (evt.attachments || [])) {
+                        if (att.rawFile && driveToken) {
+                            try {
+                                const folderId = await driveSyncService.getInquilinoOcorrenciasFolder(driveToken, timelineRental.refNumber, timelineRental.tenantName);
+                                if (folderId) {
+                                    const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, att.rawFile, att.rawFile.name);
+                                    if (uploaded) {
+                                        finalAttachments.push({
+                                            id: att.id,
+                                            file_url: uploaded.webViewLink,
+                                            file_type: att.file_type,
+                                            description: att.description,
+                                            created_at: att.created_at
+                                        });
+                                        continue;
+                                    }
+                                }
+                            } catch(e) { console.error('Erro ao fazer upload do anexo para ocorrencias', e); }
+                        }
+                        // Fallback ou base64
+                        finalAttachments.push({
+                            id: att.id,
+                            file_url: att.file_url,
+                            file_type: att.file_type,
+                            description: att.description,
+                            created_at: att.created_at
+                        });
+                    }
+
+                    const newEvt: ContractEvent = {
+                        id: Date.now().toString() + Math.random(),
+                        contract_id: timelineRental.refNumber,
+                        tenant_id: timelineRental.tenantName,
+                        type: evt.type as ContractEventType,
+                        description: evt.description || '',
+                        attachments: finalAttachments,
+                        created_by: 'Usuário',
+                        created_at: new Date().toISOString()
+                    };
+                    setContractEvents(prev => [...prev, newEvt]);
+                    showMessageAndClear('Evento registrado com sucesso!', 'success');
+                }}
+            />
+
+            <ModalMotivoAlteracao
+                isOpen={!!pendingUpdate}
+                onClose={() => setPendingUpdate(null)}
+                descriptionBase={pendingUpdate?.descriptionBase || ''}
+                onSave={confirmPendingUpdate}
+            />
+
+            <LongTermReportModal
+                isOpen={isLongTermReportModalOpen}
+                onClose={() => setIsLongTermReportModalOpen(false)}
+                rentals={rentals}
+                events={contractEvents}
+            />
+
+            <ModalAnexarComprovante
+                isOpen={!!comprovanteContext}
+                onClose={() => { setComprovanteContext(null); setUploadedComprovanteUrl(null); }}
+                onConfirm={handleComprovanteConfirm}
+                isUploading={isUploadingComprovante}
+                uploadedUrl={uploadedComprovanteUrl}
+                rental={comprovanteContext?.rental || null}
+                type={comprovanteContext?.type || 'pagamento'}
+                ownerName={comprovanteContext?.ownerName}
+            />
+
+            <ModalDocumentosContrato
+                isOpen={!!documentosRental}
+                onClose={() => setDocumentosRental(null)}
+                rental={documentosRental}
+                documents={documentosRental ? (tenantDocuments.find(d => d.contract_id === documentosRental.refNumber) || null) : null}
+                onUploadDocument={handleDocumentUpload}
+                onSetCaucaoType={handleSetCaucaoType}
+                isUploading={uploadingDocType}
+            />
         </div>
     );
 }
@@ -1000,7 +1566,7 @@ function NavItem({ icon, label, active, onClick }: any) {
 }
 
 function StatusWidget({ title, items, color, actionLabel, onAction, emptyText }: any) {
-    const bgHeader = color === 'red' ? 'bg-red-100 text-red-800' : color === 'yellow' ? 'bg-amber-100 text-amber-800' : color === 'purple' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800';
+    const bgHeader = color === 'red' ? 'bg-red-100 text-red-800' : color === 'yellow' ? 'bg-amber-100 text-amber-800' : color === 'purple' ? 'bg-purple-100 text-purple-800' : color === 'orange' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800';
     // Botão discreto: menor, sem cores muito fortes até o hover, ou cores pasteis.
     // User pediu "Pequeno e discreto" para repassado.
     const btnBase = "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-sm transform active:scale-95 whitespace-nowrap";
@@ -1008,7 +1574,9 @@ function StatusWidget({ title, items, color, actionLabel, onAction, emptyText }:
         ? `${btnBase} bg-purple-100 text-purple-700 hover:bg-purple-200`
         : color === 'purple'
             ? `${btnBase} bg-indigo-100 text-indigo-700 hover:bg-indigo-200`
-            : `${btnBase} bg-green-100 text-green-700 hover:bg-green-200`;
+            : color === 'orange'
+                ? `${btnBase} bg-orange-100 text-orange-700 hover:bg-orange-200`
+                : `${btnBase} bg-green-100 text-green-700 hover:bg-green-200`;
 
     return (
         <div className="bg-white rounded-[2rem] shadow-xl overflow-hidden border border-gray-100 flex flex-col h-[500px]">
@@ -1033,6 +1601,15 @@ function StatusWidget({ title, items, color, actionLabel, onAction, emptyText }:
                                 <div className="font-bold text-gray-800 text-sm truncate" title={item.tenantName}>{item.tenantName}</div>
                                 <div className="text-[10px] text-gray-500 truncate" title={item.propertyName}>{item.propertyName}</div>
                                 <div className="text-xs font-black text-gray-600 mt-1">R$ {item.rentAmount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                {item.missingDocs && item.missingDocs.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                        {item.missingDocs.map((md: string) => (
+                                            <span key={md} className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[8px] font-black uppercase rounded shadow-sm border border-orange-200">
+                                                {md}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             <button
                                 onClick={() => onAction(item.id)}

@@ -32,7 +32,9 @@ export interface Rental {
   month: string;
   year: number;
   isPaid: boolean;
+  paymentDate?: string;
   isTransferred: boolean;
+  transferDate?: string;
   waterBill: number;
   condoFee: number;
   iptu: number;
@@ -97,4 +99,57 @@ declare global {
     saveAs: any;
     isElectron: boolean;
   }
+}
+
+export type ContractEventType = 
+  | 'REAJUSTE_ALUGUEL'
+  | 'ACORDO_VALOR'
+  | 'REPASSE_DIVERGENTE'
+  | 'PAGAMENTO_REGISTRADO'
+  | 'OBRA_REALIZADA'
+  | 'COMUNICACAO_IMPORTANTE'
+  | 'OUTRO';
+
+export interface EventAttachment {
+  id: string;
+  event_id: string;
+  file_url: string;
+  file_type: string;
+  description?: string;
+  created_at: string;
+  rawFile?: File;
+}
+
+export interface ContractEvent {
+  id: string;
+  contract_id: string; // Will store refNumber
+  tenant_id?: string;
+  type: ContractEventType;
+  description: string;
+  old_value?: number | string | null;
+  new_value?: number | string | null;
+  created_by: string;
+  created_at: string;
+  attachments?: EventAttachment[];
+}
+
+export type CaucaoType = 'recibo' | 'sem_caucao' | 'seguro_fianca' | 'fiador';
+
+export interface TenantDocumentFile {
+  fileUrl: string;
+  fileName: string;
+  uploadedAt: string;
+  driveFileId?: string;
+  webViewLink?: string;
+}
+
+export interface TenantDocuments {
+  contract_id: string; // refNumber
+  contratoAluguel?: TenantDocumentFile;
+  entregaChaves?: TenantDocumentFile;
+  laudoVistoria?: TenantDocumentFile;
+  caucao?: {
+    type: CaucaoType;
+    file?: TenantDocumentFile;
+  };
 }

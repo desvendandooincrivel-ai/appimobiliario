@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Owner, Rental, SortState } from '../types';
-import { Edit, Trash2, FileText, DollarSign, FileDown, Percent } from 'lucide-react';
+import { Edit, Trash2, FileText, DollarSign, FileDown, Percent, History, FolderOpen } from 'lucide-react';
 import { FinancialSummary } from './FinancialSummary';
 import { IconeMais, SortIcon } from './Icons';
 import { getSortValue } from '../utils/helpers';
@@ -62,11 +62,13 @@ interface RentalListProps {
     onSort: (col: string) => void;
     owners: Owner[];
     showMessage: (msg: string, type: 'success' | 'error') => void;
+    onViewTimeline?: (rental: Rental) => void;
+    onOpenDocumentos?: (rental: Rental) => void;
 }
 
 export const RentalList: React.FC<RentalListProps> = ({
     title, rentals, onEdit, onDelete, onUpdateRental, showSummary = true,
-    onOpenItemsModal, onGerarBoleto, libsLoaded, onAplicarMulta, sortState, onSort, owners, showMessage
+    onOpenItemsModal, onGerarBoleto, libsLoaded, onAplicarMulta, sortState, onSort, owners, showMessage, onViewTimeline, onOpenDocumentos
 }) => {
     const sortedRentals = useMemo(() => {
         if (!sortState.column) return rentals;
@@ -193,11 +195,17 @@ export const RentalList: React.FC<RentalListProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-3 py-2 text-sm border-b border-r whitespace-nowrap"><span className={`px-2 rounded-full text-xs font-semibold ${status.badge}`}>{status.text}</span></td>
-                                    <td className="px-3 py-2 text-right space-x-1 border-b border-r whitespace-nowrap flex">
+                                    <td className="px-3 py-2 text-right space-x-1 border-b border-r whitespace-nowrap flex items-center">
+                                        {onViewTimeline && (
+                                            <button onClick={() => onViewTimeline(rental)} className="p-1 text-indigo-600 hover:text-indigo-900" title="Prontuário/Histórico"><History size={18} /></button>
+                                        )}
+                                        {onOpenDocumentos && (
+                                            <button onClick={() => onOpenDocumentos(rental)} className="p-1 text-amber-600 hover:text-amber-800" title="Documentos do Contrato"><FolderOpen size={18} /></button>
+                                        )}
                                         <button onClick={() => onGerarBoleto(rental)} disabled={!libsLoaded} className={`p-1 ${!libsLoaded ? 'text-gray-400' : 'text-red-600 hover:text-red-900'}`} title="PDF"><FileDown size={18} /></button>
 
-                                        <button onClick={() => onEdit(rental)} className="p-1 text-blue-600 hover:text-blue-900"><Edit size={18} /></button>
-                                        <button onClick={() => onDelete(rental.id)} className="p-1 text-red-600 hover:text-red-900"><Trash2 size={18} /></button>
+                                        <button onClick={() => onEdit(rental)} className="p-1 text-blue-600 hover:text-blue-900" title="Editar"><Edit size={18} /></button>
+                                        <button onClick={() => onDelete(rental.id)} className="p-1 text-red-600 hover:text-red-900" title="Excluir"><Trash2 size={18} /></button>
                                     </td>
                                     <td className="px-3 py-2 text-sm border-b border-r whitespace-nowrap">
                                         <button onClick={() => copyToClipboard(`Repasse p/ ${rental.owner} (LF ${rental.refNumber} ${rental.tenantName}) R$${totals.totalRepasse}`)} className="px-2 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300">Copiar</button>
