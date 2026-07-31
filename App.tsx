@@ -1,20 +1,21 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Home, Users, User, FileText, FileDown, ZoomIn, ZoomOut, Maximize, MessageSquare, ExternalLink, Send, Sparkles, Bot, AlertTriangle, RefreshCw, Zap, ZapOff, Cloud, Download, Upload } from 'lucide-react';
+import { Home, Users, User, FileText, FileDown, ZoomIn, ZoomOut, Maximize, MessageSquare, ExternalLink, Send, Sparkles, Bot, AlertTriangle, RefreshCw, Zap, ZapOff, Cloud, Download, Upload, Building2, Settings } from 'lucide-react';
 import { useLocalStorage } from './utils/storage';
 import { loadScript, formatBRL } from './utils/helpers';
 import { gerarDocumentoPDF } from './utils/pdfHelper';
 import { sampleOwners, sampleRentals, LOCAL_STORAGE_KEY, PIX_CONFIG_KEY, DEFAULT_COMPANY_NAME, DEFAULT_COMPANY_DOC, DEFAULT_COMPANY_PIX_KEY } from './utils/constants';
-import { Owner, Rental, SortState, StatementData, ConfirmActionType, ConfirmAction, Item, PixConfig, Occurrence, ContractEvent, ContractEventType } from './types';
+import { Owner, Rental, SortState, StatementData, ConfirmActionType, ConfirmAction, Item, PixConfig, Occurrence, ContractEvent, ContractEventType, ManagedProperty } from './types';
 import { Message } from './components/Message';
 import { MonthYearFilters } from './components/MonthYearFilters';
 import { FinancialSummary } from './components/FinancialSummary';
 import { RentalForm, OwnerForm } from './components/Forms';
-import { Modal, ConfirmationModal, ModalAplicarMulta, ModalAplicarReajuste, ModalOtherItems, StatementSelectionModal, ModalListaRepasse, ModalConfiguracaoPix, ModalMotivoAlteracao, LongTermReportModal } from './components/Modals';
+import { Modal, ConfirmationModal, ModalAplicarMulta, ModalAplicarReajuste, ModalOtherItems, StatementSelectionModal, ModalListaRepasse, ModalConfiguracaoPix, ModalMotivoAlteracao, LongTermReportModal, ModalRenovarContrato } from './components/Modals';
 import { OwnerList, RentalList } from './components/Lists';
 import { ContractTimeline } from './components/ContractTimeline';
 import { AIAssistant } from './components/AIAssistant';
 import { DocumentsView } from './components/DocumentsView';
+import { PropertiesPanel } from './components/PropertiesPanel';
 import { processQueryWithAI } from './utils/aiService';
 import { driveSyncService, SyncData, GoogleUser, UploadedReceipt } from './utils/driveSyncService';
 import { LoginScreen } from './components/LoginScreen';
@@ -42,15 +43,16 @@ class ErrorHandler extends React.Component<{ children: React.ReactNode }, { hasE
 }
 
 function AppContent() {
-    const [currentView, setCurrentView] = useState<'dashboard' | 'rentals' | 'owners' | 'whatsapp' | 'occurrences' | 'documents'>('dashboard');
+    const [currentView, setCurrentView] = useState<'dashboard' | 'rentals' | 'owners' | 'properties' | 'whatsapp' | 'occurrences' | 'documents'>('dashboard');
     const [message, setMessage] = useState('');
     const [messageType, setMessageType] = useState<'success' | 'error' | 'info'>('success');
     const [waContext, setWaContext] = useState<any>(null);
-    const [autoPilot, setAutoPilot] = useLocalStorage<boolean>('jobh_autopilot', false);
+    const [autoPilot, setAutoPilot] = useLocalStorage<boolean>('jobh_autopilot', true);
     const lastMsgRef = useRef<string>('');
 
     const [owners, setOwners] = useLocalStorage<Owner[]>('rental_owners_app1', sampleOwners);
     const [rentals, setRentals] = useLocalStorage<Rental[]>('rental_rentals_app1', sampleRentals);
+    const [properties, setProperties] = useLocalStorage<ManagedProperty[]>('rental_properties_app1', []);
     const [occurrences, setOccurrences] = useLocalStorage<Occurrence[]>('rental_occurrences_app1', []);
     const [pixConfig, setPixConfig] = useLocalStorage<PixConfig>(PIX_CONFIG_KEY, {
         name: DEFAULT_COMPANY_NAME, doc: DEFAULT_COMPANY_DOC, pixKey: DEFAULT_COMPANY_PIX_KEY, qrCodeBase64: '', pixPayload: '', statementNotes: ''
@@ -68,12 +70,15 @@ function AppContent() {
     const [isPixConfigModalOpen, setIsPixConfigModalOpen] = useState(false);
     const [isRepasseListModalOpen, setIsRepasseListModalOpen] = useState(false);
     const [isReajusteModalOpen, setIsReajusteModalOpen] = useState(false);
+    const [renewRental, setRenewRental] = useState<Rental | null>(null);
     const [isLongTermReportModalOpen, setIsLongTermReportModalOpen] = useState(false);
     const [reajusteRental, setReajusteRental] = useState<Rental | null>(null);
 
     const [editingRental, setEditingRental] = useState<Rental | null>(null);
     const [editingOwner, setEditingOwner] = useState<Owner | null>(null);
     const [timelineRental, setTimelineRental] = useState<Rental | null>(null);
+    const [timelineOwner, setTimelineOwner] = useState<Owner | null>(null);
+    const [timelineProperty, setTimelineProperty] = useState<ManagedProperty | null>(null);
     const [pendingUpdate, setPendingUpdate] = useState<{ id: string, fields: Partial<Rental>, oldData: Rental, changedFields: string[], descriptionBase: string } | null>(null);
     const [confirmAction, setConfirmAction] = useState<ConfirmAction>({ type: null, id: null, data: null });
 
@@ -84,6 +89,25 @@ function AppContent() {
         fields: Partial<Rental>;
         ownerName?: string;
     } | null>(null);
+
+    const saveFileLocally = async (file: File, subPath: string, fileName: string) => {
+        if (!localBackupPath) return;
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const base64 = e.target?.result as string;
+                await (window as any).ipcRenderer.invoke('save_local_file', {
+                    folderPath: localBackupPath,
+                    subPath,
+                    fileName,
+                    fileDataBase64: base64,
+                    isJson: false
+                });
+                resolve(true);
+            };
+            reader.readAsDataURL(file);
+        });
+    };
     const [isUploadingComprovante, setIsUploadingComprovante] = useState(false);
     const [uploadedComprovanteUrl, setUploadedComprovanteUrl] = useState<string | null>(null);
 
@@ -95,6 +119,7 @@ function AppContent() {
     const [waLog, setWaLog] = useState<{ role: 'user' | 'assistant', contact?: string, content: string, time: string }[]>([]);
     const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'success'>('idle');
     const [driveToken, setDriveToken] = useLocalStorage<string | null>('drive_access_token', null);
+    const [localBackupPath, setLocalBackupPath] = useLocalStorage<string | null>('app_local_backup_path', null);
     const [googleUser, setGoogleUser] = useLocalStorage<GoogleUser | null>('google_user_info', null);
     const [loginLoading, setLoginLoading] = useState(false);
     const [loginError, setLoginError] = useState<string | null>(null);
@@ -104,6 +129,56 @@ function AppContent() {
     const [appVersion, setAppVersion] = useState('0.1.x');
 
     const monthOrder = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+    const normalizePropertyText = (value: string | undefined) => (value || '').trim().toLowerCase();
+    const propertyKey = (ownerId: string | undefined, address: string | undefined) => `${ownerId || 'sem-proprietario'}::${normalizePropertyText(address)}`;
+    const propertyIdFrom = (ownerId: string | undefined, address: string | undefined) => {
+        const base = `${ownerId || 'sem-proprietario'}-${normalizePropertyText(address).replace(/[^a-z0-9]+/g, '-')}`.replace(/-+/g, '-').replace(/^-|-$/g, '');
+        return `imovel-${base || Date.now()}`;
+    };
+
+    const getPropertyForRental = (rental: Rental, propertyList: ManagedProperty[] = properties) => {
+        return propertyList.find(property => property.id === rental.propertyId) ||
+            propertyList.find(property => propertyKey(property.ownerId, property.address) === propertyKey(rental.ownerId, rental.propertyName)) ||
+            null;
+    };
+
+    const getActiveRentalForProperty = (property: ManagedProperty) => rentals.find(rental => {
+        const sameProperty = rental.propertyId === property.id || propertyKey(rental.ownerId, rental.propertyName) === propertyKey(property.ownerId, property.address);
+        return sameProperty && rental.month === selectedMonth && rental.year === selectedYear;
+    });
+
+    const ensurePropertyFromRentalData = (data: Partial<Rental>) => {
+        if (!data.ownerId || !data.propertyName) return undefined;
+        const now = new Date().toISOString();
+        const propertyId = data.propertyId || propertyIdFrom(data.ownerId, data.propertyName);
+        const nextProperty: ManagedProperty = {
+            id: propertyId,
+            ownerId: data.ownerId,
+            name: data.propertyName,
+            address: data.propertyName,
+            status: 'occupied',
+            createdAt: now,
+            updatedAt: now,
+        };
+
+        setProperties(prev => {
+            const match = prev.find(property => property.id === propertyId || propertyKey(property.ownerId, property.address) === propertyKey(data.ownerId, data.propertyName));
+            if (match) {
+                return prev.map(property => property.id === match.id ? {
+                    ...property,
+                    ownerId: data.ownerId || property.ownerId,
+                    name: property.name || data.propertyName || property.address,
+                    address: data.propertyName || property.address,
+                    status: property.status === 'vacant' ? 'occupied' : property.status,
+                    updatedAt: now,
+                } : property);
+            }
+            return [...prev, nextProperty];
+        });
+
+        return propertyId;
+    };
 
     useEffect(() => {
         Promise.all([
@@ -119,6 +194,28 @@ function AppContent() {
             console.log('Injecting missing sample data:', missingSamples.length);
             setRentals(prev => [...prev, ...missingSamples]);
             showMessageAndClear(`${missingSamples.length} novos inquilinos de teste adicionados!`, 'success');
+        }
+
+        // Tenta carregar do local se não tiver nada no estado (primeira vez no PC)
+        if (localBackupPath && owners.length === 0 && rentals.length <= sampleRentals.length) {
+            (async () => {
+                const localDataStr = await (window as any).ipcRenderer.invoke('read_local_json', {
+                    folderPath: localBackupPath,
+                    fileName: 'jobh_manager_state.json'
+                });
+                if (localDataStr) {
+                    try {
+                        const data = JSON.parse(localDataStr);
+                        if (data.owners?.length) setOwners(data.owners);
+                        if (data.rentals?.length) setRentals(data.rentals);
+                        if (data.occurrences) setOccurrences(data.occurrences);
+                        if (data.properties) setProperties(data.properties);
+                        if (data.pixConfig) setPixConfig(data.pixConfig);
+                        if (data.contractEvents) setContractEvents(data.contractEvents);
+                        if (data.tenantDocuments) setTenantDocuments(data.tenantDocuments);
+                    } catch(e) {}
+                }
+            })();
         }
 
         // Listen for auto-update events from Electron
@@ -153,6 +250,50 @@ function AppContent() {
         }
     }, []);
 
+    useEffect(() => {
+        const now = new Date().toISOString();
+        const propertyByKey = new Map(properties.map(property => [propertyKey(property.ownerId, property.address), property]));
+        let nextProperties = properties;
+        let propertiesChanged = false;
+
+        rentals.forEach(rental => {
+            if (!rental.ownerId || !rental.propertyName) return;
+            const key = propertyKey(rental.ownerId, rental.propertyName);
+            if (propertyByKey.has(key)) return;
+
+            const newProperty: ManagedProperty = {
+                id: rental.propertyId || propertyIdFrom(rental.ownerId, rental.propertyName),
+                ownerId: rental.ownerId,
+                name: rental.propertyName,
+                address: rental.propertyName,
+                status: 'occupied',
+                createdAt: now,
+                updatedAt: now,
+            };
+            propertyByKey.set(key, newProperty);
+            nextProperties = [...nextProperties, newProperty];
+            propertiesChanged = true;
+        });
+
+        if (propertiesChanged) {
+            setProperties(nextProperties);
+        }
+
+        const rentalsNeedPropertyId = rentals.some(rental => {
+            if (!rental.ownerId || !rental.propertyName) return false;
+            const matchedProperty = propertyByKey.get(propertyKey(rental.ownerId, rental.propertyName));
+            return !!matchedProperty && rental.propertyId !== matchedProperty.id;
+        });
+
+        if (rentalsNeedPropertyId) {
+            setRentals(prev => prev.map(rental => {
+                if (!rental.ownerId || !rental.propertyName) return rental;
+                const matchedProperty = propertyByKey.get(propertyKey(rental.ownerId, rental.propertyName));
+                return matchedProperty && rental.propertyId !== matchedProperty.id ? { ...rental, propertyId: matchedProperty.id } : rental;
+            }));
+        }
+    }, [rentals, properties]);
+
     // --- GOOGLE LOGIN & DRIVE SYNC ---
     const handleGoogleLogin = async () => {
         setLoginLoading(true);
@@ -171,8 +312,10 @@ function AppContent() {
                 if (remoteState.owners?.length) setOwners(remoteState.owners);
                 if (remoteState.rentals?.length) setRentals(remoteState.rentals);
                 if (remoteState.occurrences?.length) setOccurrences(remoteState.occurrences);
+                if (remoteState.properties?.length) setProperties(remoteState.properties);
                 if (remoteState.pixConfig) setPixConfig(remoteState.pixConfig);
                 if (remoteState.contractEvents?.length) setContractEvents(remoteState.contractEvents);
+                if (remoteState.tenantDocuments?.length) setTenantDocuments(remoteState.tenantDocuments);
                 showMessageAndClear(`Dados sincronizados do Drive! Última atualização: ${new Date(remoteState.lastUpdated).toLocaleString('pt-BR')}`, 'success');
             } else {
                 showMessageAndClear(`Bem-vindo, ${user?.name || 'usuário'}! Nenhum dado anterior no Drive. Começando do zero.`, 'info');
@@ -199,28 +342,217 @@ function AppContent() {
     const syncToDrive = async (token: string) => {
         if (!token) return;
         setCloudSyncStatus('syncing');
-        const ok = await driveSyncService.saveState(token, {
+        const stateData = {
             owners,
             rentals,
             occurrences,
+            properties,
             pixConfig,
             contractEvents,
+            tenantDocuments,
             lastUpdated: new Date().toISOString(),
-        });
+        };
+        const ok = await driveSyncService.saveState(token, stateData);
+        
+        // Se tiver pasta local, salva lá também
+        if (localBackupPath) {
+            await (window as any).ipcRenderer.invoke('save_local_file', {
+                folderPath: localBackupPath,
+                subPath: '',
+                fileName: 'jobh_manager_state.json',
+                fileDataBase64: JSON.stringify(stateData),
+                isJson: true
+            });
+        }
+
         setCloudSyncStatus(ok ? 'success' : 'error');
         if (ok) setTimeout(() => setCloudSyncStatus('idle'), 3000);
+    };
+
+    const handleSelectLocalFolder = async () => {
+        const ipc = (window as any).ipcRenderer;
+        if (!ipc?.invoke) {
+            showMessageAndClear('Seleção de pasta local disponível apenas no aplicativo desktop.', 'info');
+            return;
+        }
+        let path = await ipc.invoke('select_folder');
+        if (path) {
+            // Cria a subpasta do app dentro da pasta escolhida
+            path = `${path}\\Jobh Imóveis Manager`;
+            setLocalBackupPath(path);
+            showMessageAndClear(`Pasta de backup local definida: ${path}`, 'success');
+            
+            // Pergunta se deseja carregar os dados (JSON) da pasta
+            if (window.confirm('Deseja carregar o banco de dados (JSON) existente nesta pasta?')) {
+                const localDataStr = await (window as any).ipcRenderer.invoke('read_local_json', {
+                    folderPath: path,
+                    fileName: 'jobh_manager_state.json'
+                });
+                if (localDataStr) {
+                    try {
+                        const data = JSON.parse(localDataStr);
+                        if (data.owners) setOwners(data.owners);
+                        if (data.rentals) setRentals(data.rentals);
+                        if (data.occurrences) setOccurrences(data.occurrences);
+                        if (data.properties) setProperties(data.properties);
+                        if (data.pixConfig) setPixConfig(data.pixConfig);
+                        if (data.contractEvents) setContractEvents(data.contractEvents);
+                        if (data.tenantDocuments) setTenantDocuments(data.tenantDocuments);
+                        showMessageAndClear('Banco de dados carregado!', 'success');
+                    } catch(e) {
+                        showMessageAndClear('Erro ao ler arquivo de dados local.', 'error');
+                    }
+                }
+            }
+
+            // Se o Drive estiver conectado, oferece baixar todos os ARQUIVOS (fotos, PDFs)
+            if (driveToken && window.confirm('O Google Drive está conectado. Deseja baixar todos os comprovantes e documentos da nuvem para esta pasta local agora? (Recomendado para portabilidade)')) {
+                syncCloudToLocal(driveToken, path);
+            }
+        }
+    };
+
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+    const syncCloudToLocal = async (token: string, localPath: string) => {
+        setIsDownloadingAll(true);
+        showMessageAndClear('Iniciando download completo do Drive... Aguarde.', 'info');
+        try {
+            // 1. Primeiro garante que o estado remoto seja baixado
+            const remoteState = await driveSyncService.getRemoteState(token);
+            if (remoteState) {
+                // Atualiza o local com o JSON do drive
+                await (window as any).ipcRenderer.invoke('save_local_file', {
+                    folderPath: localPath,
+                    subPath: '',
+                    fileName: 'jobh_manager_state.json',
+                    fileDataBase64: JSON.stringify(remoteState),
+                    isJson: true
+                });
+                
+                // 2. Agora percorre as pastas de arquivos
+                let count = 0;
+
+                // Documentos dos Inquilinos
+                for (const doc of remoteState.tenantDocuments || []) {
+                    const rental = remoteState.rentals?.find(r => r.refNumber === doc.contract_id);
+                    if (!rental) continue;
+                    const subDir = `Inquilinos/LF${rental.refNumber} - ${rental.tenantName}/Documentos do Contrato`;
+                    
+                    const files = [
+                        { f: doc.contratoAluguel, name: doc.contratoAluguel?.fileName },
+                        { f: doc.entregaChaves, name: doc.entregaChaves?.fileName },
+                        { f: doc.laudoVistoria, name: doc.laudoVistoria?.fileName },
+                        { f: doc.caucao?.file, name: doc.caucao?.file?.fileName }
+                    ].filter(item => item.f && item.f.driveFileId);
+
+                    for (const item of files) {
+                        const blob = await driveSyncService.downloadFile(token, item.f!.driveFileId!);
+                        if (blob) {
+                            await saveBlobLocally(blob, localPath, subDir, item.name!);
+                            count++;
+                        }
+                    }
+                }
+
+                // Ocorrências (Eventos) e Comprovantes de Pagamento/Repasse
+                for (const evt of remoteState.contractEvents || []) {
+                    if (evt.attachments?.length) {
+                        const rental = remoteState.rentals?.find(r => r.refNumber === evt.contract_id);
+                        if (!rental) continue;
+
+                        for (const att of evt.attachments) {
+                            if (att.driveFileId) {
+                                // Determina o subDir correto baseado no evento
+                                let subDir = `Inquilinos/LF${rental.refNumber} - ${rental.tenantName}/Ocorrências`;
+                                let fileName = att.file_url.split('/').pop()?.split('?')[0] || `anexo_${att.id}`;
+                                
+                                if (evt.type === 'PAGAMENTO_REGISTRADO' || att.description?.includes('Comprovante')) {
+                                    const isRepasse = att.description?.includes('Repasse') || evt.description.includes('Repasse');
+                                    if (isRepasse) {
+                                        // Extrair mês/ano da descrição se possível
+                                        const match = evt.description.match(/(\w+)\/(\d{4})/);
+                                        const mes = match ? match[1] : rental.month;
+                                        const ano = match ? match[2] : rental.year;
+                                        subDir = `Proprietários/${rental.owner}/Comprovantes de Repasse/${ano}/${mes}`;
+                                        fileName = `LF${rental.refNumber} ${rental.tenantName}.${fileName.split('.').pop()}`;
+                                    } else {
+                                        const match = evt.description.match(/(\w+)\/(\d{4})/);
+                                        const mes = match ? match[1] : rental.month;
+                                        const ano = match ? match[2] : rental.year;
+                                        subDir = `Inquilinos/LF${rental.refNumber} - ${rental.tenantName}/Comprovantes de Pagamento/${ano}`;
+                                        fileName = `${mes}.${fileName.split('.').pop()}`;
+                                    }
+                                }
+
+                                const blob = await driveSyncService.downloadFile(token, att.driveFileId);
+                                if (blob) {
+                                    await saveBlobLocally(blob, localPath, subDir, fileName);
+                                    count++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                showMessageAndClear(`Sincronização concluída! ${count} arquivos baixados para ${localPath}`, 'success');
+            }
+        } catch (err) {
+            console.error('Erro na sincronização Cloud -> Local:', err);
+            showMessageAndClear('Erro ao baixar arquivos do Drive.', 'error');
+        } finally {
+            setIsDownloadingAll(false);
+        }
+    };
+
+    const saveBlobLocally = async (blob: Blob, folderPath: string, subPath: string, fileName: string) => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const base64 = e.target?.result as string;
+                await (window as any).ipcRenderer.invoke('save_local_file', {
+                    folderPath,
+                    subPath,
+                    fileName,
+                    fileDataBase64: base64,
+                    isJson: false
+                });
+                resolve(true);
+            };
+            reader.readAsDataURL(blob);
+        });
+    };
+
+    const syncToLocalOnly = async () => {
+        if (!localBackupPath) return;
+        const stateData = {
+            owners,
+            rentals,
+            occurrences,
+            properties,
+            pixConfig,
+            contractEvents,
+            tenantDocuments,
+            lastUpdated: new Date().toISOString(),
+        };
+        await (window as any).ipcRenderer.invoke('save_local_file', {
+            folderPath: localBackupPath,
+            subPath: '',
+            fileName: 'jobh_manager_state.json',
+            fileDataBase64: JSON.stringify(stateData),
+            isJson: true
+        });
     };
 
     // Debounced auto-sync
     const syncTimeoutRef = React.useRef<any>(null);
     useEffect(() => {
-        if (!driveToken) return;
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
         syncTimeoutRef.current = setTimeout(() => {
-            syncToDrive(driveToken);
+            if (driveToken) syncToDrive(driveToken);
+            else if (localBackupPath) syncToLocalOnly();
         }, 2000); // 2s debounce
         return () => clearTimeout(syncTimeoutRef.current);
-    }, [owners, rentals, occurrences, pixConfig, contractEvents, driveToken]);
+    }, [owners, rentals, occurrences, properties, pixConfig, contractEvents, tenantDocuments, driveToken, localBackupPath]);
 
     // --- BOT HEADLESS INTEGRATION ---
     const [botStatus, setBotStatus] = useState<'disconnected' | 'starting' | 'connected'>('disconnected');
@@ -232,8 +564,13 @@ function AppContent() {
             const ipc = (window as any).ipcRenderer;
             ipc.on('bot_event', (_: any, msg: any) => {
                 if (msg.type === 'STATUS') {
-                    setBotStatus(msg.data === 'CONNECTED' ? 'connected' : 'disconnected');
-                    if (msg.data === 'CONNECTED') setBotQrCode('');
+                    if (msg.data === 'CONNECTED' || msg.data === 'AUTHENTICATED') {
+                        setBotStatus('connected');
+                        setBotQrCode('');
+                    } else if (msg.data === 'DISCONNECTED') {
+                        setBotStatus('disconnected');
+                        setBotQrCode('');
+                    }
                 }
                 if (msg.type === 'QR_CODE') {
                     setBotStatus('starting');
@@ -264,25 +601,36 @@ function AppContent() {
     useEffect(() => {
         if ((window as any).ipcRenderer) {
             const ipc = (window as any).ipcRenderer;
-            const contextData = { owners, rentals, occurrences };
+            const contextData = { owners, rentals, properties, occurrences };
             ipc.send('bot_update_data', contextData);
 
             // Sync Config (API Key + AutoPilot status)
             const apiKey = localStorage.getItem('jobh_gemini_api_key') || '';
             ipc.send('bot_update_config', { apiKey, autoPilot, occurrenceContact: pixConfig.occurrenceContact });
         }
-    }, [owners, rentals, occurrences, autoPilot, pixConfig]); // Auto-syncs whenever these change
+    }, [owners, rentals, properties, occurrences, autoPilot, pixConfig]); // Auto-syncs whenever these change
 
     const handleToggleBot = () => {
         const ipc = (window as any).ipcRenderer;
-        if (botStatus === 'disconnected') {
-            setBotStatus('starting');
-            setBotLogs([]);
-            ipc.send('bot_start');
-        } else {
-            ipc.send('bot_stop');
+        if (!ipc) {
+            showMessageAndClear('O Bot de WhatsApp só pode ser executado dentro do aplicativo Desktop (Electron).', 'error');
+            return;
+        }
+        try {
+            if (botStatus === 'disconnected') {
+                setBotStatus('starting');
+                setBotLogs([]);
+                ipc.send('bot_start');
+            } else {
+                ipc.send('bot_stop');
+                setBotStatus('disconnected');
+                setBotQrCode('');
+            }
+        } catch (err: any) {
+            console.error('Erro ao alterar status do bot:', err);
             setBotStatus('disconnected');
             setBotQrCode('');
+            showMessageAndClear('Erro ao comunicar com o processo do Bot.', 'error');
         }
     };
 
@@ -294,7 +642,7 @@ function AppContent() {
 
         const syncTimeout = setTimeout(async () => {
             setCloudSyncStatus('syncing');
-            const data: SyncData = { owners, rentals, occurrences, pixConfig, lastUpdated: new Date().toISOString() };
+            const data: SyncData = { owners, rentals, occurrences, properties, pixConfig, contractEvents, tenantDocuments, lastUpdated: new Date().toISOString() };
             const success = await driveSyncService.saveState(driveToken, data);
             setCloudSyncStatus(success ? 'success' : 'error');
 
@@ -302,7 +650,7 @@ function AppContent() {
         }, 5000); // Aguarda 5 segundos de inatividade para salvar
 
         return () => clearTimeout(syncTimeout);
-    }, [owners, rentals, occurrences, pixConfig, driveToken]);
+    }, [owners, rentals, occurrences, properties, pixConfig, contractEvents, tenantDocuments, driveToken]);
 
     // CARREGAMENTO INICIAL DA NUVEM
     useEffect(() => {
@@ -315,7 +663,10 @@ function AppContent() {
                 setOwners(remoteData.owners);
                 setRentals(remoteData.rentals);
                 setOccurrences(remoteData.occurrences);
+                if (remoteData.properties) setProperties(remoteData.properties);
                 if (remoteData.pixConfig) setPixConfig(remoteData.pixConfig);
+                if (remoteData.contractEvents) setContractEvents(remoteData.contractEvents);
+                if (remoteData.tenantDocuments) setTenantDocuments(remoteData.tenantDocuments);
                 setCloudSyncStatus('success');
                 showMessageAndClear('Dados sincronizados com o Google Drive!', 'success');
             } else {
@@ -415,6 +766,18 @@ function AppContent() {
         return result;
     }, [rentalsForMonthAndYear, tenantDocuments, contractEvents]);
 
+    const expiringContracts = useMemo(() => {
+        return rentalsForMonthAndYear.filter(r => {
+            if (!r.contractEndDate) return false;
+            const endDate = new Date(r.contractEndDate);
+            const currentMonthIndex = monthOrder.indexOf(selectedMonth);
+            // Venceu em anos anteriores, ou vence no ano atual no mês atual ou anterior
+            if (endDate.getFullYear() < selectedYear) return true;
+            if (endDate.getFullYear() === selectedYear && endDate.getMonth() <= currentMonthIndex) return true;
+            return false;
+        });
+    }, [rentalsForMonthAndYear, selectedMonth, selectedYear, monthOrder]);
+
     const showMessageAndClear = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
         setMessage(msg); setMessageType(type);
     };
@@ -426,6 +789,11 @@ function AppContent() {
     const handleUpdateRental = (id: string, fields: Partial<Rental>) => {
         const oldRental = rentals.find(r => r.id === id);
         if (!oldRental) return;
+        const mergedRental = { ...oldRental, ...fields };
+        const shouldEnsureProperty = fields.ownerId !== undefined || fields.propertyName !== undefined || fields.propertyId !== undefined;
+        const ensuredPropertyId = shouldEnsureProperty ? ensurePropertyFromRentalData(mergedRental) : mergedRental.propertyId;
+        if (ensuredPropertyId) fields.propertyId = ensuredPropertyId;
+        const relatedProperty = getPropertyForRental({ ...mergedRental, propertyId: ensuredPropertyId || mergedRental.propertyId });
 
         const financialFields: (keyof Rental)[] = ['rentAmount', 'waterBill', 'condoFee', 'iptu', 'gasBill'];
         let changed = false;
@@ -448,6 +816,8 @@ function AppContent() {
                     id: Date.now().toString() + Math.random(),
                     contract_id: oldRental.refNumber,
                     tenant_id: oldRental.tenantName,
+                    owner_id: oldRental.ownerId,
+                    property_id: relatedProperty?.id,
                     type: 'PAGAMENTO_REGISTRADO',
                     description: `Aluguel referente a ${oldRental.month}/${oldRental.year} recebido no dia ${dataFormatada}.`,
                     created_by: 'Sistema',
@@ -471,6 +841,8 @@ function AppContent() {
                     id: Date.now().toString() + Math.random(),
                     contract_id: oldRental.refNumber,
                     tenant_id: oldRental.tenantName,
+                    owner_id: oldRental.ownerId,
+                    property_id: relatedProperty?.id,
                     type: 'OUTRO',
                     description: `Repasse referente a ${oldRental.month}/${oldRental.year} realizado no dia ${dataFormatada}.`,
                     created_by: 'Sistema',
@@ -501,6 +873,7 @@ function AppContent() {
         setIsUploadingComprovante(true);
         let receiptUrl: string | null = null;
         const dataFormatada = new Date().toLocaleDateString('pt-BR');
+        const receiptProperty = getPropertyForRental(rental);
 
         if (file && driveToken) {
             try {
@@ -524,9 +897,20 @@ function AppContent() {
 
                 if (folderId) {
                     const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, file, nomeArquivo);
+                    
+                    // Backup Local - Estrutura idêntica ao Drive
+                    if (localBackupPath) {
+                        const subDir = type === 'pagamento' 
+                            ? `Inquilinos/LF${rental.refNumber} - ${rental.tenantName}/Comprovantes de Pagamento/${rental.year}`
+                            : `Proprietários/${ownerName || rental.owner}/Comprovantes de Repasse/${rental.year}/${rental.month}`;
+                        await saveFileLocally(file, subDir, nomeArquivo);
+                    }
+
                     if (uploaded) {
                         receiptUrl = uploaded.webViewLink;
+                        (uploaded as any).fileId && (receiptUrl = uploaded.webViewLink); // keep it simple
                         setUploadedComprovanteUrl(receiptUrl);
+                        (file as any).driveFileId = uploaded.fileId; // Temporary store to use below
                     }
                 }
             } catch (err) {
@@ -539,6 +923,8 @@ function AppContent() {
             id: Date.now().toString() + Math.random(),
             contract_id: rental.refNumber,
             tenant_id: rental.tenantName,
+            owner_id: rental.ownerId,
+            property_id: receiptProperty?.id,
             type: type === 'pagamento' ? 'PAGAMENTO_REGISTRADO' : 'OUTRO',
             description: type === 'pagamento'
                 ? `Aluguel referente a ${rental.month}/${rental.year} recebido no dia ${dataFormatada}.${receiptUrl ? ' Comprovante anexado.' : ''}`
@@ -552,6 +938,7 @@ function AppContent() {
                 file_type: file?.type || 'application/octet-stream',
                 description: `Comprovante de ${type === 'pagamento' ? 'Pagamento' : 'Repasse'} - ${rental.month}/${rental.year}`,
                 created_at: new Date().toISOString(),
+                driveFileId: (file as any).driveFileId
             }] : undefined,
         };
         setContractEvents(prev => [...prev, newEvent]);
@@ -597,6 +984,13 @@ function AppContent() {
             };
             const fileName = `${labelMap[docType] || docType}.${ext}`;
             const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, file, fileName);
+            
+            // Backup Local - Estrutura idêntica ao Drive
+            if (localBackupPath) {
+                const subDir = `Inquilinos/LF${documentosRental.refNumber} - ${documentosRental.tenantName}/Documentos do Contrato`;
+                await saveFileLocally(file, subDir, fileName);
+            }
+
             if (!uploaded) { showMessageAndClear('Erro ao enviar arquivo.', 'error'); return; }
             const docFile: TenantDocumentFile = {
                 fileUrl: uploaded.fileUrl, fileName: uploaded.fileName,
@@ -627,6 +1021,7 @@ function AppContent() {
     const confirmPendingUpdate = (reason: string) => {
         if (!pendingUpdate) return;
         const { id, fields, oldData } = pendingUpdate;
+        const relatedProperty = getPropertyForRental(oldData);
 
         const mainChangedField = pendingUpdate.changedFields.includes('rentAmount') ? 'rentAmount' : pendingUpdate.changedFields[0];
         
@@ -634,6 +1029,8 @@ function AppContent() {
             id: Date.now().toString() + Math.random(),
             contract_id: oldData.refNumber,
             tenant_id: oldData.tenantName,
+            owner_id: oldData.ownerId,
+            property_id: relatedProperty?.id,
             type: 'ACORDO_VALOR',
             description: `${pendingUpdate.descriptionBase}\nMotivo: ${reason}`,
             old_value: oldData[mainChangedField as keyof Rental] as any,
@@ -656,6 +1053,43 @@ function AppContent() {
         }
         setCurrentStatementData({ ownerId, rentals: ownerRentals });
         setIsStatementModalOpen(true);
+    };
+
+    const handleSaveRenewal = (id: string, newEndDate: string, isAdjusted: boolean, newRentAmount?: number, reason?: string) => {
+        const rental = rentals.find(r => r.id === id);
+        if (!rental) return;
+        const relatedProperty = getPropertyForRental(rental);
+
+        // Atualiza todos os aluguéis desse contrato (com o mesmo refNumber)
+        setRentals(prev => prev.map(r => {
+            if (r.refNumber === rental.refNumber) {
+                return { 
+                    ...r, 
+                    contractEndDate: newEndDate,
+                    ...(isAdjusted && newRentAmount !== undefined ? { rentAmount: newRentAmount } : {})
+                };
+            }
+            return r;
+        }));
+
+        // Cria o evento no histórico do contrato
+        const newEvent: ContractEvent = {
+            id: Date.now().toString() + Math.random(),
+            contract_id: rental.refNumber,
+            tenant_id: rental.tenantName,
+            owner_id: rental.ownerId,
+            property_id: relatedProperty?.id,
+            type: isAdjusted ? 'ACORDO_VALOR' : 'COMUNICACAO_IMPORTANTE',
+            description: `${reason || 'Renovação de Contrato'}. Novo Vencimento: ${new Date(newEndDate).toLocaleDateString('pt-BR')}.`,
+            old_value: rental.rentAmount,
+            new_value: isAdjusted ? newRentAmount : rental.rentAmount,
+            created_by: 'Usuário',
+            created_at: new Date().toISOString()
+        };
+        setContractEvents(prev => [...prev, newEvent]);
+
+        setRenewRental(null);
+        showMessageAndClear('Contrato renovado com sucesso!', 'success');
     };
 
     const handleGenerateStatementWithNotes = (ownerId: string, selectedRentals: Rental[], notes: string) => {
@@ -711,6 +1145,100 @@ function AppContent() {
         setItemsConfig(null);
     };
 
+    const handleSaveProperty = (propertyData: Partial<ManagedProperty>) => {
+        if (!propertyData.ownerId || !propertyData.address) {
+            showMessageAndClear('Informe proprietário e endereço do imóvel.', 'error');
+            return;
+        }
+        const now = new Date().toISOString();
+        const propertyId = propertyData.id || propertyIdFrom(propertyData.ownerId, propertyData.address);
+        const nextProperty: ManagedProperty = {
+            id: propertyId,
+            ownerId: propertyData.ownerId,
+            name: propertyData.name || propertyData.address,
+            address: propertyData.address,
+            status: propertyData.status || 'vacant',
+            notes: propertyData.notes,
+            createdAt: propertyData.createdAt || now,
+            updatedAt: now,
+            lastVacancyDate: propertyData.lastVacancyDate,
+        };
+
+        setProperties(prev => {
+            const exists = prev.some(property => property.id === propertyId);
+            return exists ? prev.map(property => property.id === propertyId ? { ...property, ...nextProperty, createdAt: property.createdAt } : property) : [...prev, nextProperty];
+        });
+        showMessageAndClear('Imovel salvo no painel.', 'success');
+    };
+
+    const handleVacateProperty = (property: ManagedProperty, rental?: Rental) => {
+        if (!window.confirm(`Marcar "${property.name || property.address}" como vago?`)) return;
+        const now = new Date();
+        const dateBR = now.toLocaleDateString('pt-BR');
+        const owner = owners.find(o => o.id === property.ownerId);
+        const activeRental = rental || getActiveRentalForProperty(property);
+        const tenantText = activeRental ? ` apos saida de ${activeRental.tenantName}` : '';
+
+        setProperties(prev => prev.map(item => item.id === property.id ? {
+            ...item,
+            status: 'vacant',
+            lastVacancyDate: now.toISOString(),
+            updatedAt: now.toISOString(),
+        } : item));
+
+        const newEvent: ContractEvent = {
+            id: Date.now().toString() + Math.random(),
+            contract_id: activeRental?.refNumber || property.id,
+            tenant_id: activeRental?.tenantName,
+            owner_id: property.ownerId,
+            property_id: property.id,
+            type: 'COMUNICACAO_IMPORTANTE',
+            description: `Imovel marcado como vago em ${dateBR}${tenantText}.`,
+            related_descriptions: {
+                tenant: activeRental ? `Desocupação registrada em ${dateBR}. O imóvel ${property.address} foi marcado como vago.` : undefined,
+                owner: `${owner?.name || 'Proprietário'} teve o imóvel ${property.address} marcado como vago em ${dateBR}${tenantText}.`,
+                property: `Imovel vago desde ${dateBR}${tenantText}.`,
+            },
+            created_by: 'Sistema',
+            created_at: now.toISOString(),
+        };
+        setContractEvents(prev => [...prev, newEvent]);
+        showMessageAndClear('Imovel marcado como vago e registrado no prontuario.', 'success');
+    };
+
+    const handleRegisterMaintenance = (property: ManagedProperty, payload: { title: string; date: string; reason: string; ownerAuthorized: boolean }, rental?: Rental) => {
+        const eventDate = new Date(`${payload.date}T12:00:00`);
+        const dateBR = eventDate.toLocaleDateString('pt-BR');
+        const owner = owners.find(o => o.id === property.ownerId);
+        const activeRental = rental || getActiveRentalForProperty(property);
+        const authorizationText = payload.ownerAuthorized ? `O proprietário ${owner?.name || ''} autorizou o serviço.` : 'Serviço registrado sem autorização marcada do proprietário.';
+
+        setProperties(prev => prev.map(item => item.id === property.id ? {
+            ...item,
+            status: item.status === 'vacant' ? 'maintenance' : item.status,
+            updatedAt: new Date().toISOString(),
+        } : item));
+
+        const newEvent: ContractEvent = {
+            id: Date.now().toString() + Math.random(),
+            contract_id: activeRental?.refNumber || property.id,
+            tenant_id: activeRental?.tenantName,
+            owner_id: property.ownerId,
+            property_id: property.id,
+            type: 'OBRA_REALIZADA',
+            description: `${payload.title} realizada em ${dateBR}. Motivo: ${payload.reason}. ${authorizationText}`,
+            related_descriptions: {
+                tenant: activeRental ? `${payload.title} realizada dia ${dateBR}. Motivo: ${payload.reason}.` : undefined,
+                owner: `${owner?.name || 'Proprietário'} ${payload.ownerAuthorized ? 'autorizou' : 'teve registrada'} ${payload.title.toLowerCase()} na data ${dateBR}. Motivo: ${payload.reason}.`,
+                property: `Reforma/manutencao de ${payload.title.toLowerCase()} efetuada na data ${dateBR}. Motivo: ${payload.reason}.`,
+            },
+            created_by: 'Usuário',
+            created_at: new Date().toISOString(),
+        };
+        setContractEvents(prev => [...prev, newEvent]);
+        showMessageAndClear('Obra conectada aos prontuarios.', 'success');
+    };
+
     const handleOpenReajuste = (rentalId: string) => {
         const rental = rentals.find(r => r.id === rentalId);
         if (rental) { setReajusteRental(rental); setIsReajusteModalOpen(true); }
@@ -719,10 +1247,13 @@ function AppContent() {
     const handleSaveReajuste = (rentalId: string, newRentAmount: number, description: string, year: number) => {
         const oldRental = rentals.find(r => r.id === rentalId);
         if (oldRental) {
+            const relatedProperty = getPropertyForRental(oldRental);
             const newEvent: ContractEvent = {
                 id: Date.now().toString() + Math.random(),
                 contract_id: oldRental.refNumber,
                 tenant_id: oldRental.tenantName,
+                owner_id: oldRental.ownerId,
+                property_id: relatedProperty?.id,
                 type: 'REAJUSTE_ALUGUEL',
                 description: `Reajuste aplicado: ${description}`,
                 old_value: oldRental.rentAmount,
@@ -837,7 +1368,10 @@ function AppContent() {
             case 'SET_VIEW': setCurrentView(params.view); break;
             case 'UPSERT_RENTAL':
                 if (params.id) handleUpdateRental(params.id, params.data);
-                else setRentals(prev => [...prev, { ...params.data, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
+                else {
+                    const propertyId = ensurePropertyFromRentalData(params.data);
+                    setRentals(prev => [...prev, { ...params.data, propertyId, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
+                }
                 break;
             case 'CREATE_OCCURRENCE':
                 const newOcc: Occurrence = {
@@ -938,7 +1472,7 @@ function AppContent() {
 
     const handleExportData = () => {
         const data = {
-            owners, rentals, occurrences, pixConfig,
+            owners, rentals, properties, occurrences, pixConfig, contractEvents, tenantDocuments,
             version: '1.0',
             userInfo: { exportDate: new Date().toISOString() }
         };
@@ -961,8 +1495,11 @@ function AppContent() {
                 if (window.confirm(`Importar backup de ${json.userInfo?.exportDate || 'Data desconhecida'}? Isso substituirá os dados atuais.`)) {
                     if (json.owners) setOwners(json.owners);
                     if (json.rentals) setRentals(json.rentals);
+                    if (json.properties) setProperties(json.properties);
                     if (json.occurrences) setOccurrences(json.occurrences);
                     if (json.pixConfig) setPixConfig(json.pixConfig);
+                    if (json.contractEvents) setContractEvents(json.contractEvents);
+                    if (json.tenantDocuments) setTenantDocuments(json.tenantDocuments);
                     showMessageAndClear('Dados importados com sucesso!', 'success');
                     setTimeout(() => window.location.reload(), 1500);
                 }
@@ -1002,6 +1539,16 @@ function AppContent() {
         );
     }
 
+    const currentViewTitle: Record<typeof currentView, string> = {
+        dashboard: 'Dashboard',
+        rentals: 'Inquilinos',
+        owners: 'Proprietários',
+        properties: 'Imóveis',
+        whatsapp: 'WhatsApp',
+        occurrences: 'Chamados',
+        documents: 'Documentos',
+    };
+
     return (
         <div className="flex bg-gray-100 font-sans min-h-screen text-gray-900" style={{ zoom: zoomLevel }}>
             <nav className="w-64 bg-white border-r flex flex-col no-print shadow-xl z-30">
@@ -1029,6 +1576,7 @@ function AppContent() {
                     <NavItem icon={<Home size={18} />} label="Início" active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
                     <NavItem icon={<FileText size={18} />} label="Inquilinos" active={currentView === 'rentals'} onClick={() => setCurrentView('rentals')} />
                     <NavItem icon={<User size={18} />} label="Proprietários" active={currentView === 'owners'} onClick={() => setCurrentView('owners')} />
+                    <NavItem icon={<Building2 size={18} />} label="Imóveis" active={currentView === 'properties'} onClick={() => setCurrentView('properties')} />
                     <NavItem icon={<MessageSquare size={18} />} label="WhatsApp" active={currentView === 'whatsapp'} onClick={() => setCurrentView('whatsapp')} />
                     <NavItem icon={<AlertTriangle size={18} />} label="Chamados" active={currentView === 'occurrences'} onClick={() => setCurrentView('occurrences')} />
                     <NavItem icon={<FileDown size={18} />} label="Documentos" active={currentView === 'documents'} onClick={() => setCurrentView('documents')} />
@@ -1069,8 +1617,16 @@ function AppContent() {
             <main className="flex-1 flex flex-col relative overflow-hidden">
                 {message && <Message message={message} type={messageType} onClear={() => setMessage('')} />}
                 <div className="bg-white/80 backdrop-blur-md border-b px-10 py-5 flex justify-between items-center z-20 sticky top-0">
-                    <h1 className="text-2xl font-black text-gray-800 tracking-tight capitalize">{currentView}</h1>
+                    <h1 className="text-2xl font-black text-gray-800 tracking-tight">{currentViewTitle[currentView]}</h1>
                     <div className="flex items-center gap-6">
+                        <button
+                            onClick={() => setIsPixConfigModalOpen(true)}
+                            className="p-3 bg-white border border-gray-200 rounded-xl text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors shadow-sm"
+                            title="Configurações"
+                            aria-label="Configurações"
+                        >
+                            <Settings size={18} />
+                        </button>
                         {driveToken && (
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all"
                         style={{
@@ -1132,6 +1688,7 @@ function AppContent() {
                                     statusCounts.pagosNaoRepassados.length > 0,
                                     statusCounts.pendentes.length > 0,
                                     pendingAdjustments.length > 0,
+                                    expiringContracts.length > 0,
                                     missingDocumentsRentals.length > 0
                                 ].filter(Boolean).length;
 
@@ -1193,6 +1750,19 @@ function AppContent() {
                                                 actionLabel="Reajustar"
                                                 onAction={handleOpenReajuste}
                                                 emptyText=""
+                                            />
+                                        )}
+                                        {expiringContracts.length > 0 && (
+                                            <StatusWidget
+                                                title="Fim de Contrato"
+                                                items={expiringContracts}
+                                                color="indigo"
+                                                actionLabel="Renovar"
+                                                onAction={(id: string) => {
+                                                    const r = expiringContracts.find(x => x.id === id);
+                                                    if (r) setRenewRental(r);
+                                                }}
+                                                emptyText="Sem Vencimentos"
                                             />
                                         )}
                                         {missingDocumentsRentals.length > 0 && (
@@ -1266,9 +1836,24 @@ function AppContent() {
                                 onEdit={(o) => { setEditingOwner(o); setIsOwnerModalOpen(true); }}
                                 onDelete={(id) => { setConfirmAction({ type: 'owner', id, data: null }); setIsConfirmModalOpen(true); }}
                                 onGenerateStatement={handleGenerateStatement}
-                                onOpenPixConfig={() => setIsPixConfigModalOpen(true)}
+                                onViewTimeline={setTimelineOwner}
                             />
                         </div>
+                    </div>
+
+                    <div className={`absolute inset-0 p-10 overflow-auto transition-all duration-300 ${currentView === 'properties' ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
+                        <PropertiesPanel
+                            properties={properties}
+                            owners={owners}
+                            rentals={rentals}
+                            events={contractEvents}
+                            selectedMonth={selectedMonth}
+                            selectedYear={selectedYear}
+                            onSaveProperty={handleSaveProperty}
+                            onVacateProperty={handleVacateProperty}
+                            onOpenTimeline={setTimelineProperty}
+                            onRegisterMaintenance={handleRegisterMaintenance}
+                        />
                     </div>
 
                     {/* View: Documents / Google Drive */}
@@ -1277,6 +1862,8 @@ function AppContent() {
                             driveToken={driveToken}
                             onLogin={handleGoogleLogin}
                             onLogout={handleLogout}
+                            localBackupPath={localBackupPath}
+                            onSelectLocalFolder={handleSelectLocalFolder}
                         />
                     </div>
 
@@ -1295,17 +1882,23 @@ function AppContent() {
                             )}
 
                             {botStatus === 'starting' && botQrCode && (
-                                <div className="text-center p-10 bg-white rounded-3xl animate-in fade-in zoom-in duration-300">
+                                <div className="text-center p-10 bg-white rounded-3xl animate-in fade-in zoom-in duration-300 flex flex-col items-center">
                                     <img src={botQrCode} alt="QR Code" className="w-64 h-64 mb-4 mx-auto" />
                                     <p className="text-gray-900 font-bold mb-2">Escaneie com seu WhatsApp</p>
-                                    <p className="text-gray-400 text-xs text-center px-4">Menu &gt; Aparelhos Conectados &gt; Conectar Aparelho</p>
+                                    <p className="text-gray-400 text-xs text-center px-4 mb-4">Menu &gt; Aparelhos Conectados &gt; Conectar Aparelho</p>
+                                    <button onClick={handleToggleBot} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl text-xs font-bold transition-colors">
+                                        CANCELAR
+                                    </button>
                                 </div>
                             )}
 
                             {botStatus === 'starting' && !botQrCode && (
                                 <div className="flex flex-col items-center">
                                     <RefreshCw className="animate-spin text-indigo-400 mb-4" size={32} />
-                                    <p className="font-medium text-indigo-200">Iniciando motor de IA...</p>
+                                    <p className="font-medium text-indigo-200 mb-4">Iniciando motor de IA...</p>
+                                    <button onClick={handleToggleBot} className="bg-white/10 hover:bg-white/20 text-gray-300 px-4 py-2 rounded-xl text-xs font-bold transition-colors">
+                                        CANCELAR / REINICIAR
+                                    </button>
                                 </div>
                             )}
 
@@ -1391,10 +1984,12 @@ function AppContent() {
             }} onCancel={() => setIsConfirmModalOpen(false)} />}
 
             {isRentalModalOpen && <RentalForm isOpen={isRentalModalOpen} onClose={() => setIsRentalModalOpen(false)} onSubmit={(data) => {
+                const propertyId = ensurePropertyFromRentalData(data);
+                const rentalData = { ...data, propertyId };
                 if (editingRental) {
-                    handleUpdateRental(editingRental.id, data);
+                    handleUpdateRental(editingRental.id, rentalData);
                 } else {
-                    setRentals(prev => [...prev, { ...data, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
+                    setRentals(prev => [...prev, { ...rentalData, id: Date.now().toString(), month: selectedMonth, year: selectedYear, isPaid: false, isTransferred: false, otherItems: [], ownerItems: [] } as Rental]);
                 }
                 setIsRentalModalOpen(false); setEditingRental(null);
             }} initialData={editingRental || undefined} owners={owners} showMessage={showMessageAndClear} />}
@@ -1421,7 +2016,26 @@ function AppContent() {
                 selectedYear={selectedYear}
             />}
 
-            {isPixConfigModalOpen && <ModalConfiguracaoPix isOpen={isPixConfigModalOpen} onClose={() => setIsPixConfigModalOpen(false)} pixConfig={pixConfig} setPixConfig={setPixConfig} showMessage={showMessageAndClear} />}
+            {renewRental && <ModalRenovarContrato
+                isOpen={!!renewRental}
+                rental={renewRental}
+                onClose={() => setRenewRental(null)}
+                onSave={handleSaveRenewal}
+            />}
+
+            {isPixConfigModalOpen && <ModalConfiguracaoPix
+                isOpen={isPixConfigModalOpen}
+                onClose={() => setIsPixConfigModalOpen(false)}
+                pixConfig={pixConfig}
+                setPixConfig={setPixConfig}
+                showMessage={showMessageAndClear}
+                localBackupPath={localBackupPath}
+                onSelectLocalFolder={handleSelectLocalFolder}
+                zoomLevel={zoomLevel}
+                setZoomLevel={setZoomLevel}
+                autoPilot={autoPilot}
+                setAutoPilot={setAutoPilot}
+            />}
 
             {itemsConfig && <ModalOtherItems config={itemsConfig} onClose={() => setItemsConfig(null)} onSave={handleSaveItems} />}
 
@@ -1464,28 +2078,38 @@ function AppContent() {
                 onClose={() => setTimelineRental(null)}
                 events={timelineRental ? contractEvents.filter(e => e.contract_id === timelineRental.refNumber) : []}
                 contractRef={timelineRental?.refNumber || ''}
+                eventView="tenant"
+                title={timelineRental ? `Prontuário do Inquilino - ${timelineRental.tenantName}` : ''}
                 onAddEvent={async (evt) => {
                     if (!timelineRental) return;
                     
                     const finalAttachments = [];
                     for (const att of (evt.attachments || [])) {
-                        if (att.rawFile && driveToken) {
-                            try {
-                                const folderId = await driveSyncService.getInquilinoOcorrenciasFolder(driveToken, timelineRental.refNumber, timelineRental.tenantName);
-                                if (folderId) {
-                                    const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, att.rawFile, att.rawFile.name);
-                                    if (uploaded) {
-                                        finalAttachments.push({
-                                            id: att.id,
-                                            file_url: uploaded.webViewLink,
-                                            file_type: att.file_type,
-                                            description: att.description,
-                                            created_at: att.created_at
-                                        });
-                                        continue;
+                        if (att.rawFile) {
+                            if (localBackupPath) {
+                                const subDir = `Inquilinos/LF${timelineRental.refNumber} - ${timelineRental.tenantName}/Ocorrências`;
+                                await saveFileLocally(att.rawFile, subDir, att.rawFile.name);
+                            }
+
+                            if (driveToken) {
+                                try {
+                                    const folderId = await driveSyncService.getInquilinoOcorrenciasFolder(driveToken, timelineRental.refNumber, timelineRental.tenantName);
+                                    if (folderId) {
+                                        const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, att.rawFile, att.rawFile.name);
+                                        if (uploaded) {
+                                            finalAttachments.push({
+                                                id: att.id,
+                                                file_url: uploaded.webViewLink,
+                                                file_type: att.file_type,
+                                                description: att.description,
+                                                created_at: att.created_at,
+                                                driveFileId: uploaded.fileId
+                                            });
+                                            continue;
+                                        }
                                     }
-                                }
-                            } catch(e) { console.error('Erro ao fazer upload do anexo para ocorrencias', e); }
+                                } catch(e) { console.error('Erro ao fazer upload do anexo para ocorrencias', e); }
+                            }
                         }
                         // Fallback ou base64
                         finalAttachments.push({
@@ -1501,6 +2125,8 @@ function AppContent() {
                         id: Date.now().toString() + Math.random(),
                         contract_id: timelineRental.refNumber,
                         tenant_id: timelineRental.tenantName,
+                        owner_id: timelineRental.ownerId,
+                        property_id: getPropertyForRental(timelineRental)?.id,
                         type: evt.type as ContractEventType,
                         description: evt.description || '',
                         attachments: finalAttachments,
@@ -1509,6 +2135,52 @@ function AppContent() {
                     };
                     setContractEvents(prev => [...prev, newEvt]);
                     showMessageAndClear('Evento registrado com sucesso!', 'success');
+                }}
+            />
+
+            <ContractTimeline
+                isOpen={!!timelineProperty}
+                onClose={() => setTimelineProperty(null)}
+                events={timelineProperty ? contractEvents.filter(e => {
+                    if (e.property_id === timelineProperty.id) return true;
+                    return rentals.some(r => {
+                        const property = getPropertyForRental(r);
+                        return property?.id === timelineProperty.id && r.refNumber === e.contract_id;
+                    });
+                }) : []}
+                contractRef={timelineProperty?.name || timelineProperty?.address || ''}
+                eventView="property"
+                title={timelineProperty ? `Prontuário do Imóvel - ${timelineProperty.name || timelineProperty.address}` : ''}
+                onAddEvent={async (evt) => {
+                    if (!timelineProperty) return;
+                    const activeRental = getActiveRentalForProperty(timelineProperty);
+                    const finalAttachments = (evt.attachments || []).map(att => ({
+                        id: att.id,
+                        event_id: '',
+                        file_url: att.file_url,
+                        file_type: att.file_type,
+                        description: att.description,
+                        created_at: att.created_at
+                    }));
+                    const newEvt: ContractEvent = {
+                        id: Date.now().toString() + Math.random(),
+                        contract_id: activeRental?.refNumber || timelineProperty.id,
+                        tenant_id: activeRental?.tenantName,
+                        owner_id: timelineProperty.ownerId,
+                        property_id: timelineProperty.id,
+                        type: evt.type as ContractEventType,
+                        description: evt.description || '',
+                        related_descriptions: {
+                            property: evt.description || '',
+                            tenant: activeRental ? evt.description || '' : undefined,
+                            owner: evt.description || '',
+                        },
+                        attachments: finalAttachments,
+                        created_by: 'Usuário',
+                        created_at: new Date().toISOString()
+                    };
+                    setContractEvents(prev => [...prev, newEvt]);
+                    showMessageAndClear('Evento registrado no prontuário do imóvel.', 'success');
                 }}
             />
 
@@ -1546,6 +2218,95 @@ function AppContent() {
                 onSetCaucaoType={handleSetCaucaoType}
                 isUploading={uploadingDocType}
             />
+            <ContractTimeline
+                isOpen={!!timelineOwner}
+                onClose={() => setTimelineOwner(null)}
+                events={timelineOwner ? contractEvents.filter(e => e.owner_id === timelineOwner.id || rentals.some(r => r.ownerId === timelineOwner.id && r.refNumber === e.contract_id)) : []}
+                contractRef={timelineOwner?.name || ''}
+                ownerMode={true}
+                eventView="owner"
+                title={timelineOwner ? `Prontuário do Proprietário - ${timelineOwner.name}` : ''}
+                ownerRentals={timelineOwner ? rentals.filter(r => r.ownerId === timelineOwner.id).map(r => ({ id: r.id, refNumber: r.refNumber, tenantName: r.tenantName })) : []}
+                onAddEvent={async (evt) => {
+                    if (!timelineOwner) return;
+                    if (!evt.contract_id) {
+                        showMessageAndClear('Selecione um contrato/propriedade.', 'error');
+                        return;
+                    }
+                    const selectedRental = rentals.find(r => r.refNumber === evt.contract_id);
+                    if (!selectedRental) return;
+
+                    const finalAttachments = [];
+                    for (const att of (evt.attachments || [])) {
+                        if (att.rawFile) {
+                            // Backup Local
+                            if (localBackupPath) {
+                                const subDir = `Inquilinos/LF${selectedRental.refNumber} - ${selectedRental.tenantName}/Ocorrências`;
+                                await saveFileLocally(att.rawFile, subDir, att.rawFile.name);
+                            }
+
+                            if (driveToken) {
+                                try {
+                                    const folderId = await driveSyncService.getInquilinoOcorrenciasFolder(driveToken, selectedRental.refNumber, selectedRental.tenantName);
+                                    if (folderId) {
+                                        const uploaded = await driveSyncService.uploadReceipt(driveToken, folderId, att.rawFile, att.rawFile.name);
+                                        if (uploaded) {
+                                            finalAttachments.push({
+                                                id: att.id,
+                                                file_url: uploaded.webViewLink,
+                                                file_type: att.file_type,
+                                                description: att.description,
+                                                created_at: att.created_at,
+                                                driveFileId: uploaded.fileId
+                                            });
+                                            continue;
+                                        }
+                                    }
+                                } catch (err) {
+                                    console.error('Upload failed', err);
+                                }
+                            }
+                        }
+                        // Fallback ou base64
+                        finalAttachments.push({
+                            id: att.id,
+                            file_url: att.file_url,
+                            file_type: att.file_type,
+                            description: att.description,
+                            created_at: att.created_at
+                        });
+                    }
+                    
+                    const eventWithAttachments = { 
+                        ...evt, 
+                        id: Date.now().toString() + Math.random(),
+                        tenant_id: selectedRental.tenantName,
+                        owner_id: selectedRental.ownerId,
+                        property_id: getPropertyForRental(selectedRental)?.id,
+                        attachments: finalAttachments,
+                        created_by: 'Usuário',
+                        created_at: new Date().toISOString()
+                    };
+                    setContractEvents(prev => [...prev, eventWithAttachments as ContractEvent]);
+                    showMessageAndClear('Evento registrado com sucesso!', 'success');
+                }}
+            />
+
+            {isDownloadingAll && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center text-white p-10 text-center animate-in fade-in duration-500">
+                    <div className="bg-indigo-900/40 p-10 rounded-[3rem] border border-white/10 shadow-2xl flex flex-col items-center max-w-sm">
+                        <RefreshCw className="animate-spin mb-6 text-indigo-400" size={80} />
+                        <h2 className="text-3xl font-black mb-4">Sincronizando</h2>
+                        <p className="text-indigo-100 text-sm font-medium mb-8 leading-relaxed">
+                            Baixando todos os arquivos da nuvem para sua nova pasta local. 
+                            Isso garante que seu app funcione offline com todas as fotos e documentos.
+                        </p>
+                        <div className="w-full bg-white/10 h-3 rounded-full overflow-hidden">
+                            <div className="bg-indigo-500 h-full w-full animate-pulse"></div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

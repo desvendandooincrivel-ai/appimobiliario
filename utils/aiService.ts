@@ -25,10 +25,13 @@ export interface ChatMessage {
 const callAI = async (messages: any[], apiKey: string) => {
     const isLocal = apiKey.toLowerCase() === 'local';
     const isGemini = apiKey.startsWith('AIza');
+    const isGroq = apiKey.startsWith('gsk_');
 
     let url = isLocal ? 'http://localhost:11434/api/chat' : 'https://openrouter.ai/api/v1/chat/completions';
     if (isGemini) {
         url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    } else if (isGroq) {
+        url = 'https://api.groq.com/openai/v1/chat/completions';
     }
 
     try {
@@ -42,7 +45,7 @@ const callAI = async (messages: any[], apiKey: string) => {
                 maxOutputTokens: 4096
             }
         } : {
-            model: isLocal ? 'gemma3:1b' : 'google/gemini-2.0-flash-exp:free',
+            model: isLocal ? 'gemma3:1b' : (isGroq ? 'llama-3.3-70b-versatile' : 'google/gemini-2.0-flash-exp:free'),
             messages: messages,
             stream: false,
             temperature: 0.1,

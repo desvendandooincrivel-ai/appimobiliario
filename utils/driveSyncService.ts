@@ -10,7 +10,9 @@ export interface SyncData {
     rentals: any[];
     occurrences: any[];
     pixConfig: any;
+    properties?: any[];
     contractEvents?: any[];
+    tenantDocuments?: any[];
     lastUpdated: string;
 }
 
@@ -299,6 +301,20 @@ export const driveSyncService = {
             };
         } catch (e) {
             console.error('Erro no upload:', e);
+            return null;
+        }
+    },
+
+    // 10. Baixa o conteúdo binário de um arquivo
+    async downloadFile(accessToken: string, fileId: string): Promise<Blob | null> {
+        try {
+            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            if (!res.ok) return null;
+            return await res.blob();
+        } catch (e) {
+            console.error('Erro ao baixar arquivo:', e);
             return null;
         }
     },

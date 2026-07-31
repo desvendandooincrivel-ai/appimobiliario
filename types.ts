@@ -22,6 +22,7 @@ export interface Rental {
   id: string;
   ownerId: string;
   owner: string;
+  propertyId?: string;
   ownerAdminFeePercentage?: number;
   refNumber: string;
   tenantName: string;
@@ -42,10 +43,25 @@ export interface Rental {
   otherItems: Item[]; // Items for Tenant (add/deduct)
   ownerItems: Item[]; // Items for Owner (adjustments)
   contractDate?: string;
+  contractEndDate?: string;
   lastAdjustmentYear?: number | null;
   rentDescription?: string;
   rentAmount: number;
   phone?: string;
+}
+
+export type ManagedPropertyStatus = 'occupied' | 'vacant' | 'maintenance';
+
+export interface ManagedProperty {
+  id: string;
+  ownerId: string;
+  name: string;
+  address: string;
+  status: ManagedPropertyStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastVacancyDate?: string;
 }
 
 export interface PixConfig {
@@ -110,6 +126,14 @@ export type ContractEventType =
   | 'COMUNICACAO_IMPORTANTE'
   | 'OUTRO';
 
+export type TimelineEventView = 'tenant' | 'owner' | 'property';
+
+export interface TimelineDescriptions {
+  tenant?: string;
+  owner?: string;
+  property?: string;
+}
+
 export interface EventAttachment {
   id: string;
   event_id: string;
@@ -118,14 +142,18 @@ export interface EventAttachment {
   description?: string;
   created_at: string;
   rawFile?: File;
+  driveFileId?: string;
 }
 
 export interface ContractEvent {
   id: string;
   contract_id: string; // Will store refNumber
   tenant_id?: string;
+  owner_id?: string;
+  property_id?: string;
   type: ContractEventType;
   description: string;
+  related_descriptions?: TimelineDescriptions;
   old_value?: number | string | null;
   new_value?: number | string | null;
   created_by: string;

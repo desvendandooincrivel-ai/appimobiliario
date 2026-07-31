@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ContractEvent, ContractEventType } from '../types';
+import { ContractEvent, ContractEventType, TimelineEventView } from '../types';
 import { Modal } from './Modals';
 import { Clock, User, Tag, FileText, Paperclip, Plus, Download } from 'lucide-react';
 import { formatBRL } from '../utils/helpers';
@@ -8,18 +8,27 @@ interface ContractTimelineProps {
     isOpen: boolean;
     onClose: () => void;
     events: ContractEvent[];
-    contractRef: string;
+    contractRef: string; // Used as title
     onAddEvent: (event: Partial<ContractEvent>) => Promise<void> | void;
+    ownerMode?: boolean;
+    ownerRentals?: { id: string; refNumber: string; tenantName: string }[];
+    eventView?: TimelineEventView;
+    title?: string;
+    emptyText?: string;
 }
 
-export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onClose, events, contractRef, onAddEvent }) => {
+export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onClose, events, contractRef, onAddEvent, ownerMode, ownerRentals, eventView = 'tenant', title, emptyText }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isAddingEvent, setIsAddingEvent] = useState(false);
-    const [newEvent, setNewEvent] = useState<{type: ContractEventType, description: string, attachments: any[]}>({ type: 'COMUNICACAO_IMPORTANTE', description: '', attachments: [] });
+    const [newEvent, setNewEvent] = useState<{type: ContractEventType, description: string, attachments: any[], contract_id?: string}>({ type: 'COMUNICACAO_IMPORTANTE', description: '', attachments: [] });
     const [isUploading, setIsUploading] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+    const getEventDescription = (event: ContractEvent) => event.related_descriptions?.[eventView] || event.description;
+    const timelineTitle = title || (eventView === 'property' ? `Prontuário do Imóvel (${contractRef})` : ownerMode ? `Prontuário do Proprietário (${contractRef})` : `Prontuário do Contrato (LF ${contractRef})`);
+
     const filteredEvents = events.filter(e => 
+        getEventDescription(e).toLowerCase().includes(searchTerm.toLowerCase()) ||
         e.description.toLowerCase().includes(searchTerm.toLowerCase()) || 
         e.type.toLowerCase().includes(searchTerm.toLowerCase())
     ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -30,7 +39,7 @@ export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onCl
             setIsUploading(true);
             await onAddEvent(newEvent);
             setIsAddingEvent(false);
-            setNewEvent({ type: 'COMUNICACAO_IMPORTANTE', description: '', attachments: [] });
+            setNewEvent({ type: 'COMUNICACAO_IMPORTANTE', description: '', attachments: [], contract_id: ownerMode ? '' : undefined });
             setIsUploading(false);
         }
     };
@@ -83,7 +92,7 @@ export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onCl
     if (!isOpen) return null;
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={`Prontuário do Contrato (LF ${contractRef})`}>
+        <Modal isOpen={isOpen} onClose={onClose} title={timelineTitle}>
             <div className="flex flex-col h-[70vh]">
                 <div className="flex justify-between items-center mb-6 gap-4 border-b pb-4">
                     <input 
@@ -118,7 +127,23 @@ export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onCl
                                     <option value="OUTRO">Outro</option>
                                 </select>
                             </div>
-                            <div>
+                            {ownerMode && (
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1">Propriedade / Contrato</label>
+                                    <select 
+                                        value={newEvent.contract_id || ''} 
+                                        onChange={(e) => setNewEvent({ ...newEvent, contract_id: e.target.value })}
+                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                                        required
+                                    >
+                                        <option value="">Selecione o Inquilino...</option>
+                                        {ownerRentals?.map(r => (
+                                            <option key={r.id} value={r.refNumber}>LF{r.refNumber} - {r.tenantName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            <div className={ownerMode ? 'md:col-span-2' : ''}>
                                 <label className="block text-xs font-bold text-gray-500 mb-1">Descrição Detalhada</label>
                                 <textarea 
                                     value={newEvent.description}
@@ -161,17 +186,24 @@ export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onCl
                     <div className="absolute left-[23px] top-0 bottom-0 w-0.5 bg-gray-200"></div>
                     <div className="space-y-6 relative">
                         {filteredEvents.length === 0 ? (
-                            <div className="text-center text-gray-500 py-10 italic">Nenhum evento encontrado para este contrato.</div>
+                            <div className="text-center text-gray-500 py-10 italic">{emptyText || 'Nenhum evento encontrado neste prontuário.'}</div>
                         ) : (
                             filteredEvents.map(event => (
                                 <div key={event.id} className="relative pl-14">
                                     <div className="absolute left-4 top-1 w-5 h-5 bg-white border-4 border-indigo-500 rounded-full z-10 shadow-sm"></div>
                                     <div className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md border ${getTypeColor(event.type)}`}>
-                                                    {event.type.replace(/_/g, ' ')}
-                                                </span>
+                                        <div className="flex-1">
+                                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getTypeColor(event.type)}`}>
+                                                        {event.type.replace('_', ' ')}
+                                                    </span>
+                                                    {ownerMode && (
+                                                        <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-600 text-[10px] font-bold">
+                                                            LF{event.contract_id}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <div className="flex items-center text-xs text-gray-400 gap-1 font-bold">
                                                     <Clock size={12} /> {new Date(event.created_at).toLocaleString('pt-BR')}
                                                 </div>
@@ -181,7 +213,7 @@ export const ContractTimeline: React.FC<ContractTimelineProps> = ({ isOpen, onCl
                                             </div>
                                         </div>
                                         
-                                        <p className="text-gray-800 mt-3 whitespace-pre-wrap">{event.description}</p>
+                                        <p className="text-gray-800 mt-3 whitespace-pre-wrap">{getEventDescription(event)}</p>
                                         
                                         {(event.old_value !== undefined || event.new_value !== undefined) && (
                                             <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-4">

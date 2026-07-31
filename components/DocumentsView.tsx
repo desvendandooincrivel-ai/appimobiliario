@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Search, Folder, File, ExternalLink, RefreshCw, Cloud, HardDrive, Filter, Download } from 'lucide-react';
+import { Search, Folder, File, ExternalLink, RefreshCw, Cloud, HardDrive, Filter, Download, Sparkles } from 'lucide-react';
 
 interface DocumentsViewProps {
     driveToken: string | null;
     onLogin: () => void;
     onLogout: () => void;
+    localBackupPath: string | null;
+    onSelectLocalFolder: () => void;
 }
 
-export const DocumentsView = ({ driveToken, onLogin, onLogout }: DocumentsViewProps) => {
+export const DocumentsView = ({ driveToken, onLogin, onLogout, localBackupPath, onSelectLocalFolder }: DocumentsViewProps) => {
     const [mode, setMode] = useState<'cloud' | 'local'>('cloud');
     const [searchTerm, setSearchTerm] = useState('');
     const isConnected = !!driveToken;
@@ -77,14 +79,14 @@ export const DocumentsView = ({ driveToken, onLogin, onLogout }: DocumentsViewPr
                         <span className="text-[8px] normal-case font-normal">Sincronização automática de dados habilitada</span>
                     </p>
                 </div>
-            ) : (
+            ) : mode === 'cloud' ? (
                 <div className="flex-1 flex flex-col min-h-0">
                     <div className="p-4 border-b flex gap-3 items-center bg-gray-50/50">
                         <div className="flex-1 relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                             <input
                                 type="text"
-                                placeholder="Buscar arquivos..."
+                                placeholder="Buscar arquivos no Cloud..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="w-full bg-white border border-gray-100 rounded-xl py-2.5 pl-10 pr-4 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
@@ -96,7 +98,7 @@ export const DocumentsView = ({ driveToken, onLogin, onLogout }: DocumentsViewPr
                     <div className="flex-1 overflow-auto p-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <div className="col-span-full border-b pb-2 mb-2">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">Pastas</h4>
+                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">Pastas na Nuvem</h4>
                             </div>
 
                             {['Contratos', 'Vistorias', 'Recibos'].map(folder => (
@@ -112,7 +114,7 @@ export const DocumentsView = ({ driveToken, onLogin, onLogout }: DocumentsViewPr
                             ))}
 
                             <div className="col-span-full border-b pb-2 mb-2 mt-4">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">Recentes</h4>
+                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">Recentes (Cloud)</h4>
                             </div>
 
                             {filteredFiles.map(file => (
@@ -130,6 +132,51 @@ export const DocumentsView = ({ driveToken, onLogin, onLogout }: DocumentsViewPr
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
+                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6">
+                        <HardDrive size={40} className="text-emerald-500" />
+                    </div>
+                    <h3 className="text-2xl font-black text-gray-900 mb-2">Drive Local & Backup</h3>
+                    <p className="text-gray-500 max-w-sm mx-auto mb-8 text-sm font-medium leading-relaxed">
+                        Defina uma pasta no seu computador para que o sistema salve os dados e documentos localmente. <br/>
+                        <span className="text-emerald-600 font-bold">Funciona 100% offline.</span>
+                    </p>
+
+                    {localBackupPath ? (
+                        <div className="bg-gray-50 p-6 rounded-[1.5rem] border-2 border-dashed border-gray-200 w-full max-w-md mb-6">
+                            <div className="text-[10px] font-black text-gray-400 uppercase mb-2">Caminho Atual</div>
+                            <div className="text-sm font-mono text-gray-700 break-all bg-white p-3 rounded-lg border shadow-inner">{localBackupPath}</div>
+                            <button 
+                                onClick={onSelectLocalFolder}
+                                className="mt-4 text-xs font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest"
+                            >
+                                Alterar Pasta
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={onSelectLocalFolder}
+                            className="flex items-center gap-3 bg-emerald-600 px-8 py-4 rounded-2xl text-white font-black hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-200 active:scale-95"
+                        >
+                            <HardDrive size={20} />
+                            ESCOLHER PASTA LOCAL
+                        </button>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4 w-full max-w-md mt-10">
+                        <div className="p-4 bg-gray-50 rounded-2xl border text-left">
+                            <div className="text-emerald-600 mb-2"><Sparkles size={18}/></div>
+                            <div className="font-black text-[10px] uppercase text-gray-800">Sincronização</div>
+                            <p className="text-[9px] text-gray-500 font-medium leading-tight mt-1">Salva local antes de subir para nuvem.</p>
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-2xl border text-left">
+                            <div className="text-blue-600 mb-2"><RefreshCw size={18}/></div>
+                            <div className="font-black text-[10px] uppercase text-gray-800">Disponibilidade</div>
+                            <p className="text-[9px] text-gray-500 font-medium leading-tight mt-1">Dados acessíveis mesmo sem internet.</p>
                         </div>
                     </div>
                 </div>

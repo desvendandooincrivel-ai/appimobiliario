@@ -343,7 +343,19 @@ export const ModalListaRepasse: React.FC<{ isOpen: boolean; onClose: () => void;
     );
 };
 
-export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => void; pixConfig: PixConfig; setPixConfig: (c: PixConfig) => void; showMessage: (msg: string, type: 'success' | 'error' | 'info') => void }> = ({ isOpen, onClose, pixConfig, setPixConfig, showMessage }) => {
+export const ModalConfiguracaoPix: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    pixConfig: PixConfig;
+    setPixConfig: (c: PixConfig) => void;
+    showMessage: (msg: string, type: 'success' | 'error' | 'info') => void;
+    localBackupPath?: string | null;
+    onSelectLocalFolder?: () => void;
+    zoomLevel?: number;
+    setZoomLevel?: (value: number | ((val: number) => number)) => void;
+    autoPilot?: boolean;
+    setAutoPilot?: (value: boolean | ((val: boolean) => boolean)) => void;
+}> = ({ isOpen, onClose, pixConfig, setPixConfig, showMessage, localBackupPath, onSelectLocalFolder, zoomLevel, setZoomLevel, autoPilot, setAutoPilot }) => {
     const [name, setName] = useState(pixConfig?.name || DEFAULT_COMPANY_NAME);
     const [doc, setDoc] = useState(pixConfig?.doc || DEFAULT_COMPANY_DOC);
     const [pixKey, setPixKey] = useState(pixConfig?.pixKey || DEFAULT_COMPANY_PIX_KEY);
@@ -351,10 +363,12 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
     const [pixPayload, setPixPayload] = useState(pixConfig?.pixPayload || '');
     const [statementNotes, setStatementNotes] = useState(pixConfig?.statementNotes || '');
     const [occurrenceContact, setOccurrenceContact] = useState(pixConfig?.occurrenceContact || '');
+    const [geminiApiKey, setGeminiApiKey] = useState(localStorage.getItem('jobh_gemini_api_key') || '');
     const fileRef = useRef<HTMLInputElement>(null);
 
     const handleSave = () => {
         if (!name || !doc) { showMessage('Nome e Documento obrigatórios.', 'error'); return; }
+        localStorage.setItem('jobh_gemini_api_key', geminiApiKey);
         setPixConfig({ name, doc, pixKey, qrCodeBase64, pixPayload, statementNotes, occurrenceContact });
         showMessage('Configuração salva!', 'success'); onClose();
     };
@@ -368,8 +382,8 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Configuração PIX Padrão">
-            <div className="space-y-4">
+        <Modal isOpen={isOpen} onClose={onClose} title="Configurações do App">
+            <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                     <div><label>Nome</label><input value={name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.currentTarget.value)} className="w-full p-2 border rounded" /></div>
                     <div><label>Documento</label><input value={doc} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDoc(e.currentTarget.value)} className="w-full p-2 border rounded" /></div>
@@ -388,7 +402,32 @@ export const ModalConfiguracaoPix: React.FC<{ isOpen: boolean; onClose: () => vo
                     </div>
                 </div>
                 <div><label>Notas Padrão (Demonstrativo)</label><textarea value={statementNotes} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setStatementNotes(e.currentTarget.value)} rows={3} className="w-full p-2 border rounded" /></div>
+                <div><label>Chave API (Gemini ou Groq)</label><input type="password" value={geminiApiKey} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGeminiApiKey(e.currentTarget.value)} className="w-full p-2 border rounded" placeholder="AIzaSy... ou gsk_..." /></div>
                 <div><label>Contato para Chamados (ex: 552299999999)</label><input value={occurrenceContact} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOccurrenceContact(e.currentTarget.value)} className="w-full p-2 border rounded" placeholder="Apenas números, com DDI e DDD" /></div>
+                <div className="border-t pt-4">
+                    <h4 className="font-bold mb-3">Configurações gerais</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                            <p className="text-xs font-black uppercase text-gray-400">Backup local</p>
+                            <p className="text-xs font-bold text-gray-600 truncate mt-1" title={localBackupPath || ''}>{localBackupPath || 'Não definido'}</p>
+                            {onSelectLocalFolder && <button onClick={onSelectLocalFolder} className="mt-3 w-full p-2 bg-white border text-gray-700 rounded-lg font-black text-xs uppercase">Escolher pasta</button>}
+                        </div>
+                        <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                            <p className="text-xs font-black uppercase text-gray-400">Zoom</p>
+                            <div className="flex items-center justify-between mt-2">
+                                <button onClick={() => setZoomLevel?.(z => Math.max(0.5, z - 0.1))} className="w-9 h-9 bg-white border rounded-lg font-black">-</button>
+                                <span className="font-black text-gray-800">{Math.round((zoomLevel || 1) * 100)}%</span>
+                                <button onClick={() => setZoomLevel?.(z => Math.min(2, z + 0.1))} className="w-9 h-9 bg-white border rounded-lg font-black">+</button>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                            <p className="text-xs font-black uppercase text-gray-400">Bot autônomo</p>
+                            <button onClick={() => setAutoPilot?.(v => !v)} className={`mt-2 w-full p-3 rounded-lg font-black text-xs uppercase ${autoPilot ? 'bg-green-600 text-white' : 'bg-white border text-gray-600'}`}>
+                                {autoPilot ? 'Ligado' : 'Desligado'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <div className="flex justify-end pt-2"><button onClick={handleSave} className="bg-green-600 text-white px-4 py-2 rounded">Salvar</button></div>
             </div>
         </Modal>
@@ -507,6 +546,67 @@ export const LongTermReportModal: React.FC<{ isOpen: boolean; onClose: () => voi
             </div>
             <div className="mt-6 flex justify-end">
                 <button onClick={onClose} className="px-6 py-2 bg-gray-100 font-bold rounded-xl text-gray-700">Fechar</button>
+            </div>
+        </Modal>
+    );
+};
+
+export const ModalRenovarContrato: React.FC<{
+    isOpen: boolean;
+    rental: Rental;
+    onClose: () => void;
+    onSave: (id: string, newEndDate: string, isAdjusted: boolean, newRentAmount?: number, reason?: string) => void;
+}> = ({ isOpen, rental, onClose, onSave }) => {
+    const [durationMonths, setDurationMonths] = useState(12);
+    const [isAdjusted, setIsAdjusted] = useState(false);
+    const [newRentAmount, setNewRentAmount] = useState(rental.rentAmount.toString());
+    const [reason, setReason] = useState('Renovação de Contrato');
+
+    if (!isOpen) return null;
+
+    const handleSave = () => {
+        const currentDate = rental.contractEndDate ? new Date(rental.contractEndDate) : new Date();
+        const nextDate = new Date(currentDate);
+        nextDate.setMonth(nextDate.getMonth() + durationMonths);
+        const newEndDateStr = nextDate.toISOString().split('T')[0];
+
+        const amount = isAdjusted ? parseFloat(newRentAmount.replace(',', '.')) : undefined;
+
+        onSave(rental.id, newEndDateStr, isAdjusted, amount, reason);
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Renovar Contrato">
+            <div className="flex flex-col gap-4 p-4">
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-4">
+                    <p className="text-sm text-blue-800 font-bold">Inquilino: {rental.tenantName}</p>
+                    <p className="text-xs text-blue-600 mt-1">Ref: {rental.refNumber} • Vencimento Atual: {rental.contractEndDate ? new Date(rental.contractEndDate).toLocaleDateString('pt-BR') : 'Não definido'}</p>
+                </div>
+
+                <div>
+                    <label className="block text-xs font-black text-gray-500 uppercase mb-2">Prazo de Renovação (Meses)</label>
+                    <input type="number" min="1" value={durationMonths} onChange={(e) => setDurationMonths(parseInt(e.target.value))} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none" />
+                </div>
+
+                <div className="flex items-center gap-3 mt-2 bg-gray-50 p-4 rounded-xl border">
+                    <input type="checkbox" id="checkAdjust" checked={isAdjusted} onChange={(e) => setIsAdjusted(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" />
+                    <label htmlFor="checkAdjust" className="font-bold text-gray-700 cursor-pointer">Aplicar Reajuste no Valor do Aluguel?</label>
+                </div>
+
+                {isAdjusted && (
+                    <div className="animate-fade-in mt-2 p-4 border border-indigo-100 rounded-xl bg-indigo-50/30">
+                        <label className="block text-xs font-black text-indigo-500 uppercase mb-2">Novo Valor do Aluguel (R$)</label>
+                        <input type="text" value={newRentAmount} onChange={(e) => setNewRentAmount(e.target.value)} className="w-full p-3 border border-indigo-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-xl font-black text-indigo-700" placeholder="0,00" />
+                        
+                        <label className="block text-xs font-black text-indigo-500 uppercase mb-2 mt-4">Motivo / Descrição</label>
+                        <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} className="w-full p-3 border border-indigo-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none" />
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-3 mt-6">
+                    <button onClick={onClose} className="px-6 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+                    <button onClick={handleSave} className="px-8 py-3 bg-indigo-600 text-white font-black rounded-xl hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200">Confirmar Renovação</button>
+                </div>
             </div>
         </Modal>
     );

@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Owner, Rental, SortState } from '../types';
-import { Edit, Trash2, FileText, DollarSign, FileDown, Percent, History, FolderOpen } from 'lucide-react';
+import { Edit, Trash2, FileText, FileDown, Percent, History, FolderOpen } from 'lucide-react';
 import { FinancialSummary } from './FinancialSummary';
 import { IconeMais, SortIcon } from './Icons';
 import { getSortValue } from '../utils/helpers';
@@ -11,16 +11,11 @@ interface OwnerListProps {
     onEdit: (owner: Owner) => void;
     onDelete: (id: string) => void;
     onGenerateStatement: (id: string) => void;
-    onOpenPixConfig: () => void;
+    onViewTimeline?: (owner: Owner) => void;
 }
 
-export const OwnerList: React.FC<OwnerListProps> = ({ owners, onEdit, onDelete, onGenerateStatement, onOpenPixConfig }) => (
+export const OwnerList: React.FC<OwnerListProps> = ({ owners, onEdit, onDelete, onGenerateStatement, onViewTimeline }) => (
     <div className="overflow-x-auto mt-4 bg-white p-6 rounded-xl shadow-lg">
-        <div className="flex justify-end mb-4">
-            <button onClick={onOpenPixConfig} className="flex items-center bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700">
-                <DollarSign size={18} className="mr-2" /> Configurar PIX
-            </button>
-        </div>
         {owners.length > 0 ? (
             <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -35,6 +30,7 @@ export const OwnerList: React.FC<OwnerListProps> = ({ owners, onEdit, onDelete, 
                             <td className="px-3 py-2 text-sm border">{owner.cpf}</td>
                             <td className="px-3 py-2 text-sm border">{owner.adminFeePercentage}%</td>
                             <td className="px-3 py-2 text-right text-sm font-medium space-x-2 border">
+                                <button onClick={() => onViewTimeline && onViewTimeline(owner)} className="text-indigo-600 hover:text-indigo-900" title="Prontuário/Eventos"><History size={18} /></button>
                                 <button onClick={() => onGenerateStatement(owner.id)} className="text-green-600 hover:text-green-900"><FileText size={18} /></button>
                                 <button onClick={() => onEdit(owner)} className="text-blue-600 hover:text-blue-900"><Edit size={18} /></button>
                                 <button onClick={() => onDelete(owner.id)} className="text-red-600 hover:text-red-900"><Trash2 size={18} /></button>

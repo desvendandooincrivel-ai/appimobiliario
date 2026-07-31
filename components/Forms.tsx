@@ -80,6 +80,7 @@ export const RentalForm: React.FC<RentalFormProps> = ({ isOpen, onClose, onSubmi
     const [rentAmountText, setRentAmountText] = useState('');
     const [dueDay, setDueDay] = useState('');
     const [contractDate, setContractDate] = useState('');
+    const [contractEndDate, setContractEndDate] = useState('');
     const [refNumber, setRefNumber] = useState('');
     const [waterBillText, setWaterBillText] = useState('0');
     const [condoFeeText, setCondoFeeText] = useState('0');
@@ -97,6 +98,7 @@ export const RentalForm: React.FC<RentalFormProps> = ({ isOpen, onClose, onSubmi
             setRentAmountText((initialData.rentAmount || '').toString().replace('.', ','));
             setDueDay(initialData.dueDay?.toString() || '');
             setContractDate(initialData.contractDate || '');
+            setContractEndDate(initialData.contractEndDate || '');
             setRefNumber(initialData.refNumber || '');
             setWaterBillText((initialData.waterBill || 0).toString().replace('.', ','));
             setCondoFeeText((initialData.condoFee || 0).toString().replace('.', ','));
@@ -105,7 +107,7 @@ export const RentalForm: React.FC<RentalFormProps> = ({ isOpen, onClose, onSubmi
             setRentDescription(initialData.rentDescription || 'Aluguel');
         } else {
             setOwnerId(''); setTenantName(''); setTenantCpf(''); setTenantRgCnh(''); setPropertyName('');
-            setRentAmountText(''); setDueDay(''); setContractDate(''); setRefNumber('');
+            setRentAmountText(''); setDueDay(''); setContractDate(''); setContractEndDate(''); setRefNumber('');
             setWaterBillText('0'); setCondoFeeText('0'); setIptuText('0'); setGasBillText('0'); setRentDescription('Aluguel');
         }
     }, [initialData, isOpen]);
@@ -131,7 +133,7 @@ export const RentalForm: React.FC<RentalFormProps> = ({ isOpen, onClose, onSubmi
             owner: selectedOwner.name,
             ownerAdminFeePercentage: selectedOwner.adminFeePercentage,
             tenantName, tenantCpf, tenantRgCnh, propertyName,
-            rentAmount, dueDay: parseInt(dueDay), contractDate, refNumber,
+            rentAmount, dueDay: parseInt(dueDay), contractDate, contractEndDate, refNumber,
             waterBill, condoFee, iptu, gasBill,
             otherItems: initialData?.otherItems || [],
             ownerItems: initialData?.ownerItems || [],
@@ -151,8 +153,9 @@ export const RentalForm: React.FC<RentalFormProps> = ({ isOpen, onClose, onSubmi
                 <div className="md:col-span-4"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Endereço</label><input type="text" value={propertyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPropertyName(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none" required /></div>
                 <div className="md:col-span-4"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Descrição</label><input type="text" value={rentDescription} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRentDescription(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none font-bold text-indigo-700" /></div>
                 <div className="md:col-span-1"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Venc.</label><select value={dueDay} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setDueDay(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none bg-white font-bold" required> <option value="">Dia</option>{Array.from({ length: 31 }, (_, i) => i + 1).map(day => (<option key={day} value={day}>{day}</option>))}</select></div>
-                <div className="md:col-span-1"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Data Contrato</label><input type="date" value={contractDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setContractDate(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none bg-white" /></div>
-                <div className="md:col-span-2"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Aluguel (R$)</label><input type="text" value={rentAmountText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRentAmountText(e.currentTarget.value)} className="w-full p-3 border border-indigo-200 bg-indigo-50 rounded-xl outline-none font-black text-indigo-700 text-lg" placeholder="2500,00" required /></div>
+                <div className="md:col-span-1"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Início Contrato</label><input type="date" value={contractDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setContractDate(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none bg-white" /></div>
+                <div className="md:col-span-1"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Fim Contrato</label><input type="date" value={contractEndDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setContractEndDate(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none bg-white" /></div>
+                <div className="md:col-span-1"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Aluguel (R$)</label><input type="text" value={rentAmountText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRentAmountText(e.currentTarget.value)} className="w-full p-3 border border-indigo-200 bg-indigo-50 rounded-xl outline-none font-black text-indigo-700 text-lg" placeholder="2500,00" required /></div>
                 <div className="md:col-span-1 border-t pt-4"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Água</label><input type="text" value={waterBillText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWaterBillText(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none" /></div>
                 <div className="md:col-span-1 border-t pt-4"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Cond.</label><input type="text" value={condoFeeText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondoFeeText(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none" /></div>
                 <div className="md:col-span-1 border-t pt-4"><label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">IPTU</label><input type="text" value={iptuText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIptuText(e.currentTarget.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none" /></div>

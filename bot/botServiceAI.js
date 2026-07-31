@@ -17,15 +17,33 @@ async function processQueryWithAI(query, contextData, apiKey, history = []) {
     const waHistory = history.map(h => `${h.role === 'assistant' ? 'Jobh IA' : 'Cliente'}: ${h.content}`).join('\n');
 
     const systemPrompt = `Você é a Jobh IA, o assistente inteligente da Jobh Imóveis. 
-Sua missão é ajudar na gestão de inquilinos e WhatsApp.
+Sua missão é ajudar na gestão de inquilinos e atuar no atendimento via WhatsApp.
 
-REGRAS CRÍTICAS:
+REGRAS CRÍTICAS DE RESPOSTA:
 1. FOCO NO AGORA: Ignorar saudações antigas. Hoje é ${dayOfWeek}, ${fullDate} às ${time}.
-2. CRIAR CHAMADO: Se o inquilino relatar problemas de manutenção, retorne "CREATE_OCCURRENCE".
-3. ATUALIZAR DADOS: Se o usuário pedir para alterar algo (ex: "Mude o aluguel da Maria para 2000" ou "Marque como pago"), use a ação "UPDATE_RENTAL".
-   - Params: { rentalId: "ID_DO_INQUILINO", field: "NOME_DO_CAMPO", value: "NOVO_VALOR" }
-   - Campos válidos: rentAmount (número), dueDay (número), isPaid (true/false), tenantName (texto).
-4. Formato: SEMPRE JSON válido.
+2. OBRIGATÓRIO RETORNAR APENAS JSON VÁLIDO no seguinte formato:
+{
+  "text": "Sua mensagem amigável e profissional para enviar ao cliente no WhatsApp.",
+  "actions": [
+    {
+      "name": "CREATE_OCCURRENCE | UPDATE_RENTAL",
+      "params": { ... }
+    }
+  ]
+}
+
+3. QUANDO CRIAR CHAMADO (CREATE_OCCURRENCE):
+   - Se o cliente/inquilino relatar qualquer vazamento, problema elétrico, fechadura quebrada, infiltração, conserto ou solicitação de manutenção, adicione no array "actions":
+     {
+       "name": "CREATE_OCCURRENCE",
+       "params": {
+         "description": "Resumo claro do problema relatado",
+         "urgency": "low | medium | high"
+       }
+     }
+
+4. QUANDO ATUALIZAR DADOS (UPDATE_RENTAL):
+   - Params: { "rentalId": "ID_DO_INQUILINO", "field": "rentAmount | dueDay | isPaid | tenantName", "value": novo_valor }
 
 Dados Atuais: ${dayOfWeek}, ${fullDate} (${time})
 ---
@@ -51,7 +69,67 @@ ${waHistory}`;
         { role: 'user', content: query }
     ];
 
+    if (apiKey.startsWith('gsk_')) {
+        return await callGroq(messages, apiKey);
+    }
+
     return await callGemini(messages, apiKey);
+}
+
+async function callGroq(messages, apiKey) {
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+    
+    // Mapeia mensagens para o formato OpenAI/Groq
+    const finalMessages = messages.map(m => {
+        let role = m.role;
+        if (m.role === 'model') role = 'assistant';
+        return { role: role, content: m.content };
+    });
+
+    const body = {
+        model: 'llama-3.3-70b-versatile',
+        messages: finalMessages,
+        temperature: 0.1,
+        max_tokens: 1000
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey.trim()}`
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error?.message || `Erro Groq ${response.status}`);
+        }
+
+        const data = await response.json();
+        const rawContent = data.choices?.[0]?.message?.content;
+
+        if (!rawContent) throw new Error("Sem resposta da IA");
+
+        // Limpeza JSON
+        const cleanContent = rawContent.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+        try {
+            const firstBrace = cleanContent.indexOf('{');
+            const lastBrace = cleanContent.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1) {
+                return JSON.parse(cleanContent.substring(firstBrace, lastBrace + 1));
+            }
+            return JSON.parse(cleanContent);
+        } catch (e) {
+            return { text: rawContent };
+        }
+
+    } catch (error) {
+        console.error("Erro Groq:", error);
+        return { text: "Erro técnico ao processar Groq." };
+    }
 }
 
 async function callGemini(messages, apiKey) {
